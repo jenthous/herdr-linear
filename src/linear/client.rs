@@ -79,6 +79,14 @@ impl LinearClient {
         *self.rate.lock().unwrap()
     }
 
+    /// 키 지문. 캐시가 어느 키로 받은 것인지 구분할 때 쓴다. 키 자체는 드러나지 않는다.
+    pub fn key_fingerprint(&self) -> String {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        self.api_key.hash(&mut h);
+        format!("{:016x}", h.finish())
+    }
+
     /// GraphQL 요청을 보내고 응답의 `data`를 `T`로 돌려준다.
     pub fn execute<T: DeserializeOwned>(
         &self,
@@ -349,5 +357,15 @@ mod tests {
         };
         assert!(!plenty.should_pause_auto(1_000));
         assert!(!RateLimit::default().should_pause_auto(1_000));
+    }
+
+    #[test]
+    fn fingerprint_is_stable_per_key_and_hides_it() {
+        let a = LinearClient::new("lin_api_aaaa");
+        let a2 = LinearClient::new("lin_api_aaaa");
+        let b = LinearClient::new("lin_api_bbbb");
+        assert_eq!(a.key_fingerprint(), a2.key_fingerprint());
+        assert_ne!(a.key_fingerprint(), b.key_fingerprint());
+        assert!(!a.key_fingerprint().contains("aaaa"));
     }
 }

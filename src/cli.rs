@@ -151,7 +151,7 @@ pub fn login_with_key(
     };
     config::save_api_key(paths, key)?;
     let store = open_cache(paths)?;
-    save_viewer(&store, &viewer, now_ms())?;
+    save_viewer(&store, &viewer, now_ms(), &client.key_fingerprint())?;
     Ok(format!(
         "{}님, {} 워크스페이스에 연결됐어요",
         viewer.name, viewer.organization.name
@@ -172,21 +172,26 @@ pub fn logout(paths: &Paths) -> Result<String> {
     Ok("API 키와 캐시를 지웠어요".to_string())
 }
 
-fn save_viewer(store: &Store, v: &Viewer, now: i64) -> Result<()> {
+fn save_viewer(store: &Store, v: &Viewer, now: i64, key_fp: &str) -> Result<()> {
     store.ensure_org(&v.organization.id)?;
     store.meta_set("viewer", &serde_json::to_string(v)?)?;
     store.meta_set("viewer_at", &now.to_string())?;
+    store.meta_set("viewer_key", key_fp)?;
     Ok(())
 }
 
-/// 내 정보. 60분 안에 받은 것이 있으면 캐시를 쓴다.
-/// 오프라인이면 오래된 캐시라도 쓰고, 그것도 없으면 `None`.
+/// 내 정보. 같은 키로 60분 안에 받은 것이 있으면 캐시를 쓴다.
+/// 키가 바뀌었으면(다른 워크스페이스일 수 있음) TTL과 상관없이 다시 받고, 그때 캐시의 워크스페이스를 맞춘다.
+/// 오프라인이면 같은 키로 받은 오래된 캐시라도 쓰고, 그것도 없으면 `None`.
 pub fn load_viewer(ctx: &Ctx, force: bool) -> Result<Option<Viewer>> {
+    let key_fp = ctx.client.key_fingerprint();
+    let same_key = ctx.store.meta_get("viewer_key")?.as_deref() == Some(key_fp.as_str());
     let cached: Option<(Viewer, i64)> = match (
+        same_key,
         ctx.store.meta_get("viewer")?,
         ctx.store.meta_get("viewer_at")?,
     ) {
-        (Some(v), Some(at)) => serde_json::from_str(&v)
+        (true, Some(v), Some(at)) => serde_json::from_str(&v)
             .ok()
             .map(|v| (v, at.parse().unwrap_or(0))),
         _ => None,
@@ -199,7 +204,7 @@ pub fn load_viewer(ctx: &Ctx, force: bool) -> Result<Option<Viewer>> {
     }
     match queries::viewer(&ctx.client) {
         Ok(v) => {
-            save_viewer(&ctx.store, &v, ctx.now_ms)?;
+            save_viewer(&ctx.store, &v, ctx.now_ms, &key_fp)?;
             Ok(Some(v))
         }
         Err(ApiError::Offline(_)) => Ok(cached.map(|(v, _)| v)),
@@ -253,6 +258,8 @@ pub fn whoami(ctx: &Ctx) -> Result<String> {
 }
 
 pub fn mine(ctx: &Ctx) -> Result<String> {
+    // 키의 워크스페이스가 바뀌었으면 여기서 캐시가 비워진다 (같은 키면 60분에 한 번만 요청)
+    load_viewer(ctx, false)?;
     match queries::my_issues(&ctx.client) {
         Ok(issues) => {
             ctx.store.upsert_issues(&issues, ctx.now_ms)?;
@@ -309,6 +316,8 @@ pub fn search(ctx: &Ctx, input: &str, deep: bool) -> Result<String> {
 }
 
 pub fn show(ctx: &Ctx, id: &str) -> Result<String> {
+    // 다른 워크스페이스의 이슈가 이전 캐시에 섞이지 않도록 먼저 워크스페이스를 맞춘다
+    load_viewer(ctx, false)?;
     match queries::issue_detail(&ctx.client, id) {
         Ok(Some(d)) => {
             let removed = ctx
@@ -777,6 +786,7 @@ mod tests {
         let mut server = mockito::Server::new();
         server
             .mock("POST", "/graphql")
+            .match_body(Matcher::Regex("query Detail".into()))
             .with_status(400)
             .with_body(r#"{"errors":[{"message":"Entity not found: Issue","extensions":{"code":"INVALID_INPUT"}}]}"#)
             .create();
@@ -796,6 +806,7 @@ mod tests {
             json!({ "nodes": [], "pageInfo": { "hasNextPage": false, "endCursor": null } });
         server
             .mock("POST", "/graphql")
+            .match_body(Matcher::Regex("query Detail".into()))
             .with_body(json!({ "data": { "issue": issue } }).to_string())
             .create();
         let (_d, ctx) = test_ctx(url(&server));
@@ -907,6 +918,45 @@ mod tests {
         load_viewer(&ctx, false).unwrap().unwrap();
         load_viewer(&ctx, false).unwrap().unwrap();
         m.assert();
+    }
+
+    #[test]
+    fn key_change_refetches_viewer_within_ttl() {
+        let mut server = mockito::Server::new();
+        let m = mock_viewer(&mut server).expect(1);
+        let (_d, ctx) = test_ctx(url(&server));
+        // 다른 키로 방금 저장된 viewer: TTL 안이어도 다시 물어봐야 한다
+        ctx.store
+            .meta_set("viewer", &viewer_json().to_string())
+            .unwrap();
+        ctx.store.meta_set("viewer_at", &NOW.to_string()).unwrap();
+        ctx.store
+            .meta_set("viewer_key", "fp-of-another-key")
+            .unwrap();
+        load_viewer(&ctx, false).unwrap().unwrap();
+        m.assert();
+    }
+
+    #[test]
+    fn mine_clears_cache_of_previous_workspace() {
+        let mut server = mockito::Server::new();
+        mock_viewer(&mut server);
+        mock_issues(
+            &mut server,
+            vec![IssueBuilder::new("n1", "ENG-1", "새 워크스페이스").json()],
+        );
+        let (_d, ctx) = test_ctx(url(&server));
+        // 이전 키(다른 워크스페이스)로 쌓인 캐시
+        ctx.store.ensure_org("org-old").unwrap();
+        ctx.store
+            .upsert_issues(
+                &[IssueBuilder::new("o1", "OLD-1", "옛 워크스페이스").build()],
+                NOW,
+            )
+            .unwrap();
+        mine(&ctx).unwrap();
+        assert_eq!(ctx.store.get_issue("OLD-1").unwrap(), None);
+        assert!(ctx.store.get_issue("ENG-1").unwrap().is_some());
     }
 
     #[test]
