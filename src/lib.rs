@@ -2,6 +2,7 @@
 
 pub mod config;
 pub mod linear;
+pub mod markdown;
 pub mod search;
 pub mod store;
 
