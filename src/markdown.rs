@@ -178,6 +178,18 @@ impl Renderer {
         while self.out.last().is_some_and(|l| l.spans.is_empty()) {
             self.out.pop();
         }
+        // `&#27;` 같은 문자 참조는 파싱하면서 제어 문자로 디코드되므로, 출력 직전에 다시 거른다
+        for line in &mut self.out {
+            for span in &mut line.spans {
+                if span.content.chars().any(char::is_control) {
+                    span.content = sanitize(&span.content).into();
+                }
+            }
+        }
+        for link in &mut self.links {
+            link.url = sanitize(&link.url);
+            link.label = sanitize(&link.label);
+        }
         Rendered {
             lines: self.out,
             links: self.links,
@@ -938,5 +950,36 @@ mod tests {
         let table = "| a | b | c | d | e |\n|---|---|---|---|---|\n| 1 | 2 | 3 | 4 | 5 |\n";
         let r = render(table, 10, &Theme::default());
         assert_eq!(r.lines.len(), 5);
+    }
+
+    fn has_control(s: &str) -> bool {
+        s.chars().any(|c| c.is_control() && c != '\n')
+    }
+
+    #[test]
+    fn entity_encoded_control_characters_are_removed() {
+        // pulldown-cmark는 숫자 문자 참조를 디코드하므로, 파싱 뒤에도 걸러야 한다
+        let r = render(
+            "a &#27;]52;c;ZXZpbA==&#7; b &#x1b;[2J c &#x9b;31m d",
+            80,
+            &Theme::default(),
+        );
+        let text = to_plain(&r.lines);
+        assert!(!has_control(&text), "{text:?}");
+        assert_eq!(text, "a ]52;c;ZXZpbA== b [2J c 31m d");
+    }
+
+    #[test]
+    fn entity_encoded_control_characters_in_links_and_tables_are_removed() {
+        let r = render(
+            "[링크&#7;](https://e.com/&#27;[2J)\n\n| a |\n|---|\n| &#27;]0;t&#7; |\n",
+            80,
+            &Theme::default(),
+        );
+        assert_eq!(r.links.len(), 1);
+        assert!(!has_control(&r.links[0].url), "{:?}", r.links[0].url);
+        assert!(!has_control(&r.links[0].label), "{:?}", r.links[0].label);
+        let text = to_plain(&r.lines);
+        assert!(!has_control(&text), "{text:?}");
     }
 }

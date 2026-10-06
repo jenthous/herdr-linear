@@ -899,6 +899,25 @@ mod tests {
     }
 
     #[test]
+    fn show_strips_entity_encoded_escapes_with_color_on() {
+        let (_d, mut ctx) = test_ctx(OFFLINE.into());
+        ctx.color = true;
+        ctx.store
+            .upsert_issues(
+                &[IssueBuilder::new("i1", "ENG-1", "제목")
+                    .description("a &#27;]52;c;ZXZpbA==&#7; b\n\n[x](https://e.com/&#27;[2J)")
+                    .build()],
+                NOW,
+            )
+            .unwrap();
+        let out = show(&ctx, "ENG-1").unwrap();
+        // 색상(ESC [ … m)은 우리가 넣은 것이라 허용하고, OSC·BEL·화면 지우기는 없어야 한다
+        assert!(!out.contains("\u{1b}]"), "{out:?}");
+        assert!(!out.contains('\u{7}'), "{out:?}");
+        assert!(!out.contains("\u{1b}[2J"), "{out:?}");
+    }
+
+    #[test]
     fn rate_limit_says_when_to_retry() {
         let mut server = mockito::Server::new();
         server
