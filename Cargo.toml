@@ -1,0 +1,32 @@
+[package]
+name = "herdr-linear"
+version = "0.1.0"
+edition = "2024"
+description = "Fast Linear lookup for herdr"
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0.104"
+chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
+clap = { version = "4.6.7", features = ["derive"] }
+nucleo-matcher = "0.3.1"
+pulldown-cmark = { version = "0.13.4", default-features = false }
+ratatui = "0.30.2"
+regex = "1.13.1"
+rpassword = "7.5.4"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.21"
+toml = "1.1.6"
+unicode-normalization = "0.1.25"
+unicode-width = "0.2.2"
+ureq = { version = "3.4.2", features = ["json"] }
+
+[dev-dependencies]
+mockito = "1.7.2"
+tempfile = "3.27.0"
+
+[profile.release]
+lto = "thin"
+strip = true
