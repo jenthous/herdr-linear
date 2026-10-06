@@ -3,10 +3,10 @@
 mod cache;
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use rusqlite::Connection;
+use rusqlite::{Connection, Transaction, TransactionBehavior};
 
 use crate::config::ensure_private_dir;
 
@@ -14,11 +14,11 @@ use crate::config::ensure_private_dir;
 pub const SCHEMA_VERSION: i64 = 1;
 
 const SCHEMA: &str = "
-CREATE TABLE meta (
+CREATE TABLE IF NOT EXISTS meta (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
-CREATE TABLE issues (
+CREATE TABLE IF NOT EXISTS issues (
   id          TEXT PRIMARY KEY,
   identifier  TEXT NOT NULL UNIQUE,
   team_id     TEXT NOT NULL,
@@ -33,27 +33,27 @@ CREATE TABLE issues (
   fetched_at  INTEGER NOT NULL,
   viewed_at   INTEGER
 );
-CREATE TABLE comments (
+CREATE TABLE IF NOT EXISTS comments (
   issue_id   TEXT PRIMARY KEY,
   data       TEXT NOT NULL,
   fetched_at INTEGER NOT NULL
 );
-CREATE TABLE view_results (
+CREATE TABLE IF NOT EXISTS view_results (
   view_key   TEXT PRIMARY KEY,
   issue_ids  TEXT NOT NULL,
   fetched_at INTEGER NOT NULL
 );
-CREATE TABLE team_refs (
+CREATE TABLE IF NOT EXISTS team_refs (
   team_id    TEXT PRIMARY KEY,
   data       TEXT NOT NULL,
   fetched_at INTEGER NOT NULL
 );
-CREATE TABLE workspace_labels (
+CREATE TABLE IF NOT EXISTS workspace_labels (
   id         INTEGER PRIMARY KEY CHECK (id = 1),
   data       TEXT NOT NULL,
   fetched_at INTEGER NOT NULL
 );
-CREATE TABLE branch_map (
+CREATE TABLE IF NOT EXISTS branch_map (
   repo       TEXT NOT NULL,
   branch     TEXT NOT NULL,
   identifier TEXT,
@@ -95,41 +95,68 @@ impl Store {
         let conn = Connection::open(path)?;
         set_private(path);
         conn.busy_timeout(Duration::from_secs(5))?;
-        conn.pragma_update(None, "journal_mode", "WAL")?;
+        set_wal(&conn)?;
         let store = Store { conn };
         store.init()?;
         Ok(store)
     }
 
+    /// 스키마를 만든다. 다른 프로세스가 같은 파일을 동시에 처음 열 수 있으므로,
+    /// 버전 확인부터 `user_version` 기록까지를 한 쓰기 트랜잭션으로 묶는다.
     fn init(&self) -> Result<()> {
-        let version: i64 = self
-            .conn
-            .pragma_query_value(None, "user_version", |r| r.get(0))?;
-        if version == SCHEMA_VERSION {
+        if user_version(&self.conn)? == SCHEMA_VERSION {
             return Ok(());
         }
-        if version != 0 {
-            self.drop_all_tables()?;
+        let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
+        // 잠금을 기다리는 사이 다른 프로세스가 만들었을 수 있으니 다시 확인한다
+        let version = user_version(&tx)?;
+        if version != SCHEMA_VERSION {
+            if version != 0 {
+                drop_all_tables(&tx)?;
+            }
+            tx.execute_batch(SCHEMA)?;
+            tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
-        self.conn.execute_batch(SCHEMA)?;
-        self.conn
-            .pragma_update(None, "user_version", SCHEMA_VERSION)?;
+        tx.commit()?;
         Ok(())
     }
+}
 
-    fn drop_all_tables(&self) -> Result<()> {
-        let names: Vec<String> = {
-            let mut st = self.conn.prepare(
-                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
-            )?;
-            st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?
-        };
-        for name in names {
-            self.conn
-                .execute_batch(&format!("DROP TABLE IF EXISTS \"{name}\""))?;
+fn user_version(conn: &Connection) -> Result<i64> {
+    Ok(conn.pragma_query_value(None, "user_version", |r| r.get(0))?)
+}
+
+/// WAL로 바꾼다. 다른 연결이 같은 순간 바꾸는 중이면 busy_timeout이 적용되지 않아
+/// 바로 BUSY가 나므로, 5초 안에서 직접 다시 시도한다.
+fn set_wal(conn: &Connection) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match conn.pragma_update(None, "journal_mode", "WAL") {
+            Ok(()) => return Ok(()),
+            Err(rusqlite::Error::SqliteFailure(f, _))
+                if matches!(
+                    f.code,
+                    rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+                ) && Instant::now() < deadline =>
+            {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(e) => return Err(e.into()),
         }
-        Ok(())
     }
+}
+
+fn drop_all_tables(conn: &Connection) -> Result<()> {
+    let names: Vec<String> = {
+        let mut st = conn.prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+        )?;
+        st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?
+    };
+    for name in names {
+        conn.execute_batch(&format!("DROP TABLE IF EXISTS \"{name}\""))?;
+    }
+    Ok(())
 }
 
 fn is_corrupt(e: &anyhow::Error) -> bool {
@@ -233,6 +260,46 @@ mod tests {
         writer.join().unwrap();
         assert_eq!(a.meta_get("keep").unwrap().as_deref(), Some("yes"));
         assert_eq!(a.meta_get("b").unwrap().as_deref(), Some("2"));
+    }
+
+    #[test]
+    fn concurrent_first_open_succeeds() {
+        // 팔레트와 사이드 패널이 처음 뜰 때처럼, 빈 경로를 두 프로세스가 동시에 연다
+        for round in 0..20 {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("cache.db");
+            let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+            let handles: Vec<_> = (0..2)
+                .map(|i| {
+                    let (path, barrier) = (path.clone(), barrier.clone());
+                    std::thread::spawn(move || -> Result<(), String> {
+                        barrier.wait();
+                        let s = Store::open(&path).map_err(|e| format!("open: {e:#}"))?;
+                        s.meta_set(&format!("k{i}"), "v")
+                            .map_err(|e| format!("write: {e:#}"))
+                    })
+                })
+                .collect();
+            for h in handles {
+                let r = h.join().unwrap();
+                assert!(r.is_ok(), "round {round}: {r:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn half_initialized_file_recovers() {
+        // 스키마를 만들다가 user_version을 쓰기 전에 끊긴 파일
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cache.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);")
+                .unwrap();
+        }
+        let store = Store::open(&path).unwrap();
+        store.meta_set("k", "v").unwrap();
+        assert_eq!(store.meta_get("k").unwrap().as_deref(), Some("v"));
     }
 
     #[cfg(unix)]

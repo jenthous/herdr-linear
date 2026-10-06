@@ -77,7 +77,7 @@ impl Ctx {
         }
         let key = config::resolve_api_key(std::env::var("LINEAR_API_KEY").ok(), &paths)?
             .ok_or_else(|| anyhow!("API 키가 없어요. 먼저 `herdr-linear login`을 실행하세요"))?;
-        let store = Store::open(&paths.cache_db())?;
+        let store = open_cache(&paths)?;
         let now = now_ms();
         store.evict_older_than(now - settings.cache_retention_days as i64 * DAY_MS)?;
         let width = ratatui::crossterm::terminal::size()
@@ -150,12 +150,20 @@ pub fn login_with_key(
         Err(e) => return Err(e.into()),
     };
     config::save_api_key(paths, key)?;
-    let store = Store::open(&paths.cache_db())?;
+    let store = open_cache(paths)?;
     save_viewer(&store, &viewer, now_ms())?;
     Ok(format!(
         "{}님, {} 워크스페이스에 연결됐어요",
         viewer.name, viewer.organization.name
     ))
+}
+
+/// 캐시를 연다. 열 수 없으면 경고하고, 이번 실행은 저장 없이 메모리 캐시로 계속한다.
+fn open_cache(paths: &Paths) -> Result<Store> {
+    Store::open(&paths.cache_db()).or_else(|e| {
+        eprintln!("경고: 캐시를 열지 못해 이번에는 저장 없이 실행해요 ({e:#})");
+        Store::open_in_memory()
+    })
 }
 
 pub fn logout(paths: &Paths) -> Result<String> {
@@ -849,6 +857,22 @@ mod tests {
         .unwrap_err();
         assert!(err.to_string().contains("유효하지 않아요"));
         assert!(!ctx.paths.credentials_file().exists());
+    }
+
+    #[test]
+    fn login_continues_when_cache_cannot_open() {
+        let mut server = mockito::Server::new();
+        mock_viewer(&mut server);
+        let (_d, ctx) = test_ctx(url(&server));
+        // 상태 디렉터리 자리에 파일이 있어서 캐시를 열 수 없는 상황
+        std::fs::write(&ctx.paths.state_dir, b"not a dir").unwrap();
+        let endpoint = url(&server);
+        let out = login_with_key(&ctx.paths, "lin_api_new", |k| {
+            LinearClient::with_endpoint(k, endpoint.clone())
+        })
+        .unwrap();
+        assert_eq!(out, "김민수님, Acme 워크스페이스에 연결됐어요");
+        assert!(ctx.paths.credentials_file().exists());
     }
 
     #[test]
