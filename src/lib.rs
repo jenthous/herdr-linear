@@ -3,6 +3,7 @@
 pub mod config;
 pub mod linear;
 pub mod search;
+pub mod store;
 
 #[cfg(test)]
 pub mod test_support;
