@@ -308,6 +308,10 @@ impl Runtime {
                         .upsert_issues(std::slice::from_ref(&d.issue), now),
                 );
                 self.note(self.store.set_comments(&d.issue.id, &d.comments, now));
+                // 관계 없이 다시 받았으면(None) 저장된 관계를 그대로 둔다
+                if let Some(r) = &d.relations {
+                    self.note(self.store.set_relations(&d.issue.id, r, now));
+                }
                 self.note(self.store.mark_viewed(&d.issue.id, now));
                 vec![Msg::Detail {
                     id,
@@ -545,13 +549,17 @@ impl Runtime {
                 .flatten()
                 .map(|(c, _)| c)
                 .unwrap_or_default();
+            let relations = self
+                .note(self.store.get_relations(&issue.id))
+                .flatten()
+                .map(|(r, _)| r);
             self.note(self.store.mark_viewed(&issue.id, now));
             msgs.push(Msg::Detail {
                 id: id.clone(),
                 issue,
                 comments,
                 more: false,
-                relations: None,
+                relations,
                 fresh: false,
             });
         }
@@ -787,6 +795,7 @@ fn log_panics(path: PathBuf) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::linear::types::{IssueRelations, RelatedIssue};
     use crate::test_support::IssueBuilder;
     use mockito::Matcher;
     use serde_json::{Value, json};
@@ -1374,5 +1383,106 @@ mod tests {
         assert!(!is_web_url("file:///etc/passwd"));
         assert!(!is_web_url("-a Calculator"));
         assert!(!is_web_url("vscode://open"));
+    }
+
+    #[test]
+    fn detail_sends_cached_relations_then_saves_fresh_ones() {
+        let mut fx = fixture(Some(KeySource::File), true, Origin::default());
+        fx.rt
+            .store
+            .upsert_issues(&[issue("a", "ENG-1", "제목")], T0)
+            .unwrap();
+        let blocker = issue("b1", "ENG-5", "막는 이슈");
+        let cached = IssueRelations {
+            blocked_by: vec![RelatedIssue {
+                id: blocker.id,
+                identifier: blocker.identifier,
+                title: blocker.title,
+                state: blocker.state,
+            }],
+            ..IssueRelations::default()
+        };
+        fx.rt.store.set_relations("a", &cached, T0).unwrap();
+        let mut detail = IssueBuilder::new("a", "ENG-1", "제목").json();
+        detail["comments"] =
+            json!({ "nodes": [], "pageInfo": { "hasNextPage": false, "endCursor": null } });
+        detail["inverseRelations"] = json!({ "nodes": [
+            { "type": "blocks", "issue": IssueBuilder::new("b2", "ENG-6", "새로 막는 이슈").json() }
+        ] });
+        mock(&mut fx.server, "Detail", json!({ "issue": detail }));
+        let first = fx.rt.execute(Effect::OpenDetail("ENG-1".into()), T0);
+        assert!(
+            matches!(&first[0], Msg::Detail { fresh: false, relations: Some(r), .. } if *r == cached),
+            "{first:?}"
+        );
+        let fresh = settle(&mut fx.rt, T0);
+        let Msg::Detail {
+            relations: Some(r),
+            fresh: true,
+            ..
+        } = &fresh[0]
+        else {
+            panic!("{fresh:?}");
+        };
+        assert_eq!(r.blocked_by[0].identifier, "ENG-6");
+        assert_eq!(
+            fx.rt.store.get_relations("a").unwrap().unwrap().0,
+            r.clone()
+        );
+    }
+
+    #[test]
+    fn relation_free_detail_keeps_cached_relations() {
+        let mut fx = fixture(Some(KeySource::File), true, Origin::default());
+        fx.rt
+            .store
+            .upsert_issues(&[issue("a", "ENG-1", "제목")], T0)
+            .unwrap();
+        let blocker = issue("b1", "ENG-5", "막는 이슈");
+        let cached = IssueRelations {
+            blocked_by: vec![RelatedIssue {
+                id: blocker.id,
+                identifier: blocker.identifier,
+                title: blocker.title,
+                state: blocker.state,
+            }],
+            ..IssueRelations::default()
+        };
+        fx.rt.store.set_relations("a", &cached, T0).unwrap();
+        // 관계 쿼리 실패
+        fx.server
+            .mock("POST", "/graphql")
+            .match_body(Matcher::Regex("inverseRelations".into()))
+            .with_body(r#"{"errors":[{"message":"Entity not found: Issue"}]}"#)
+            .create();
+        // 관계 없는 쿼리 성공
+        let mut detail = IssueBuilder::new("a", "ENG-1", "제목").json();
+        detail["comments"] =
+            json!({ "nodes": [], "pageInfo": { "hasNextPage": false, "endCursor": null } });
+        fx.server
+            .mock("POST", "/graphql")
+            .match_body(Matcher::Regex(r"endCursor \} \} \} \}".into()))
+            .with_body(json!({ "data": { "issue": detail } }).to_string())
+            .create();
+        let first = fx.rt.execute(Effect::OpenDetail("ENG-1".into()), T0);
+        assert!(
+            matches!(&first[0], Msg::Detail { fresh: false, relations: Some(r), .. } if *r == cached),
+            "{first:?}"
+        );
+        let fresh = settle(&mut fx.rt, T0);
+        let Msg::Detail {
+            relations: None,
+            fresh: true,
+            ..
+        } = &fresh[0]
+        else {
+            panic!("{fresh:?}");
+        };
+        // 캐시된 관계가 변경되지 않았는지 확인
+        assert_eq!(
+            fx.rt.store.get_relations("a").unwrap().unwrap().0,
+            cached,
+            "cached relations should be unchanged"
+        );
     }
 }
