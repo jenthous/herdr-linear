@@ -5,7 +5,7 @@ use std::io::IsTerminal;
 use anyhow::{Result, anyhow, bail};
 use clap::{Parser, Subcommand};
 
-use crate::config::{self, Paths, Settings};
+use crate::config::{self, KeySource, Paths, Settings};
 use crate::linear::client::{ApiError, LinearClient};
 use crate::linear::filter::{build_issue_filter, token_filter};
 use crate::linear::queries;
@@ -58,6 +58,8 @@ pub struct Ctx {
     pub settings: Settings,
     pub store: Store,
     pub client: LinearClient,
+    /// 키를 어디서 얻었는지 (환경 변수 키의 인증 실패를 따로 안내한다)
+    pub key_source: KeySource,
     pub now_ms: i64,
     /// 색을 쓸지 (표준 출력이 터미널일 때)
     pub color: bool,
@@ -75,11 +77,16 @@ impl Ctx {
         for w in warnings {
             eprintln!("경고: {w}");
         }
-        let key = config::resolve_api_key(std::env::var("LINEAR_API_KEY").ok(), &paths)?
-            .ok_or_else(|| anyhow!("API 키가 없어요. 먼저 `herdr-linear login`을 실행하세요"))?;
+        let key = config::resolve_api_key(
+            std::env::var("LINEAR_API_KEY").ok(),
+            &paths,
+            &config::default_credential_fallbacks(),
+        )?
+        .ok_or_else(|| anyhow!("API 키가 없어요. 먼저 `herdr-linear login`을 실행하세요"))?;
         let store = open_cache(&paths)?;
         let now = now_ms();
-        store.evict_older_than(now - settings.cache_retention_days as i64 * DAY_MS)?;
+        let retention = (settings.cache_retention_days as i64).saturating_mul(DAY_MS);
+        store.evict_older_than(now.saturating_sub(retention))?;
         let width = ratatui::crossterm::terminal::size()
             .map(|(w, _)| w)
             .unwrap_or(100)
@@ -89,6 +96,7 @@ impl Ctx {
             settings,
             store,
             client: LinearClient::new(key.value),
+            key_source: key.source,
             now_ms: now,
             color: std::io::stdout().is_terminal(),
             width,
@@ -101,7 +109,7 @@ pub fn run(cli: Cli) -> Result<String> {
     let paths = Paths::from_env()?;
     match cli.command {
         Command::Login => return login(&paths),
-        Command::Logout => return logout(&paths),
+        Command::Logout => return logout(&paths, &config::default_credential_fallbacks()),
         _ => {}
     }
     let ctx = Ctx::open(paths)?;
@@ -152,10 +160,10 @@ pub fn login_with_key(
     config::save_api_key(paths, key)?;
     let store = open_cache(paths)?;
     save_viewer(&store, &viewer, now_ms(), &client.key_fingerprint())?;
-    Ok(format!(
+    Ok(markdown::sanitize(&format!(
         "{}님, {} 워크스페이스에 연결됐어요",
         viewer.name, viewer.organization.name
-    ))
+    )))
 }
 
 /// 캐시를 연다. 열 수 없으면 경고하고, 이번 실행은 저장 없이 메모리 캐시로 계속한다.
@@ -166,8 +174,9 @@ fn open_cache(paths: &Paths) -> Result<Store> {
     })
 }
 
-pub fn logout(paths: &Paths) -> Result<String> {
-    config::delete_credentials(paths)?;
+/// 키(보조 위치 포함)와 캐시를 지운다. `fallbacks`는 실제 실행에서만 HOME 기준 위치를 넘긴다.
+pub fn logout(paths: &Paths, fallbacks: &[std::path::PathBuf]) -> Result<String> {
+    config::delete_credentials(paths, fallbacks)?;
     remove_db_files(&paths.cache_db());
     Ok("API 키와 캐시를 지웠어요".to_string())
 }
@@ -208,7 +217,7 @@ pub fn load_viewer(ctx: &Ctx, force: bool) -> Result<Option<Viewer>> {
             Ok(Some(v))
         }
         Err(ApiError::Offline(_)) => Ok(cached.map(|(v, _)| v)),
-        Err(e) => Err(api_error(e, ctx.now_ms)),
+        Err(e) => Err(api_error(ctx, e)),
     }
 }
 
@@ -250,11 +259,25 @@ pub fn whoami(ctx: &Ctx) -> Result<String> {
             scope_team_ids(&v, &ctx.settings).len()
         ),
     ];
+    if let Some(w) = scope_warning(&v, &ctx.settings) {
+        out.push(w);
+    }
     let rate = ctx.client.rate_limit();
     if let Some(r) = rate.requests_remaining {
         out.push(format!("남은 요청: {r} (시간당)"));
     }
-    Ok(out.join("\n"))
+    // 이름·팀 이름은 워크스페이스 구성원이 정할 수 있는 값이라 제어 문자를 지운다
+    Ok(markdown::sanitize(&out.join("\n")))
+}
+
+/// config의 `teams`가 내 팀과 하나도 맞지 않으면 경고 문구. 이때 범위 제한 없이 모든 팀에서 찾는다.
+pub fn scope_warning(viewer: &Viewer, settings: &Settings) -> Option<String> {
+    (!settings.teams.is_empty() && scope_team_ids(viewer, settings).is_empty()).then(|| {
+        format!(
+            "경고: config의 teams({})와 맞는 팀이 없어서 모든 팀에서 찾아요",
+            settings.teams.join(", ")
+        )
+    })
 }
 
 pub fn mine(ctx: &Ctx) -> Result<String> {
@@ -279,7 +302,7 @@ pub fn mine(ctx: &Ctx) -> Result<String> {
             )),
             None => Err(anyhow!("오프라인이고 저장된 결과도 없어요: {msg}")),
         },
-        Err(e) => Err(api_error(e, ctx.now_ms)),
+        Err(e) => Err(api_error(ctx, e)),
     }
 }
 
@@ -298,6 +321,12 @@ pub fn search(ctx: &Ctx, input: &str, deep: bool) -> Result<String> {
             .as_ref()
             .map(|v| scope_team_ids(v, &ctx.settings))
             .unwrap_or_default();
+        if let Some(w) = viewer
+            .as_ref()
+            .and_then(|v| scope_warning(v, &ctx.settings))
+        {
+            eprintln!("{w}");
+        }
         queries::filter_issues(&ctx.client, &build_issue_filter(&q, &scope))
     };
     match server {
@@ -311,7 +340,7 @@ pub fn search(ctx: &Ctx, input: &str, deep: bool) -> Result<String> {
             &local[..local.len().min(SEARCH_LIMIT)],
             Some(&format!("오프라인: 저장된 이슈에서만 찾았어요 · {msg}")),
         )),
-        Err(e) => Err(api_error(e, ctx.now_ms)),
+        Err(e) => Err(api_error(ctx, e)),
     }
 }
 
@@ -364,7 +393,7 @@ pub fn show(ctx: &Ctx, id: &str) -> Result<String> {
                 Some(&format!("오프라인: 저장된 내용 · {msg}")),
             ))
         }
-        Err(e) => Err(api_error(e, ctx.now_ms)),
+        Err(e) => Err(api_error(ctx, e)),
     }
 }
 
@@ -400,14 +429,18 @@ pub fn ago(now_ms: i64, then_ms: i64) -> String {
     }
 }
 
-/// 한도 초과면 언제 다시 시도할 수 있는지 알려준다.
-fn api_error(e: ApiError, now_ms: i64) -> anyhow::Error {
+/// API 오류를 사용자 문구로 바꾼다.
+/// 한도 초과면 언제 다시 시도할지, 환경 변수 키가 틀렸으면 그 사실을 알려준다.
+fn api_error(ctx: &Ctx, e: ApiError) -> anyhow::Error {
     match e {
         ApiError::RateLimited {
             reset_at_ms: Some(reset),
         } => {
-            let mins = ((reset - now_ms).max(0) + 59_999) / 60_000;
+            let mins = ((reset - ctx.now_ms).max(0) + 59_999) / 60_000;
             anyhow!("Linear API 한도를 넘었어요. {mins}분 후 다시 시도하세요")
+        }
+        ApiError::Auth if ctx.key_source == KeySource::Env => {
+            anyhow!("LINEAR_API_KEY 환경 변수의 키가 유효하지 않아요")
         }
         other => other.into(),
     }
@@ -582,6 +615,7 @@ mod tests {
             settings: Settings::default(),
             store: Store::open_in_memory().unwrap(),
             client: LinearClient::with_endpoint("lin_api_test", endpoint),
+            key_source: KeySource::File,
             now_ms: NOW,
             color: false,
             width: 60,
@@ -891,7 +925,7 @@ mod tests {
         let (_d, ctx) = test_ctx(OFFLINE.into());
         config::save_api_key(&ctx.paths, "lin_api_x").unwrap();
         Store::open(&ctx.paths.cache_db()).unwrap();
-        logout(&ctx.paths).unwrap();
+        logout(&ctx.paths, &[]).unwrap();
         assert!(!ctx.paths.credentials_file().exists());
         assert!(!ctx.paths.cache_db().exists());
     }
@@ -1014,5 +1048,61 @@ mod tests {
         assert_eq!(ago(NOW, NOW - 59 * 60_000), "59분 전");
         assert_eq!(ago(NOW, NOW - 3 * 3_600_000), "3시간 전");
         assert_eq!(ago(NOW, NOW - 2 * 86_400_000), "2일 전");
+    }
+
+    #[test]
+    fn env_key_auth_failure_names_the_env_var() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/graphql")
+            .with_status(400)
+            .with_body(r#"{"errors":[{"message":"Authentication required","extensions":{"code":"AUTHENTICATION_ERROR"}}]}"#)
+            .create();
+        let (_d, mut ctx) = test_ctx(url(&server));
+        ctx.key_source = KeySource::Env;
+        let err = mine(&ctx).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "LINEAR_API_KEY 환경 변수의 키가 유효하지 않아요"
+        );
+        ctx.key_source = KeySource::File;
+        let err = mine(&ctx).unwrap_err();
+        assert_eq!(err.to_string(), "API 키가 만료됐거나 권한이 없어요");
+    }
+
+    #[test]
+    fn whoami_strips_control_characters() {
+        let mut server = mockito::Server::new();
+        let mut v = viewer_json();
+        v["name"] = json!("김민수\u{1b}]52;c;eA==\u{7}");
+        v["teams"]["nodes"][0]["name"] = json!("Eng\u{1b}[2J");
+        server
+            .mock("POST", "/graphql")
+            .match_body(Matcher::Regex("query Viewer".into()))
+            .with_body(json!({ "data": { "viewer": v } }).to_string())
+            .create();
+        let (_d, ctx) = test_ctx(url(&server));
+        let out = whoami(&ctx).unwrap();
+        assert!(!out.chars().any(|c| c.is_control() && c != '\n'), "{out:?}");
+        assert!(out.contains("김민수]52;c;eA=="), "{out}");
+    }
+
+    #[test]
+    fn scope_warning_on_unknown_teams() {
+        let v: Viewer = serde_json::from_value(viewer_json()).unwrap();
+        assert_eq!(scope_warning(&v, &Settings::default()), None);
+        let ok = Settings {
+            teams: vec!["ENG".into()],
+            ..Settings::default()
+        };
+        assert_eq!(scope_warning(&v, &ok), None);
+        let typo = Settings {
+            teams: vec!["EGN".into()],
+            ..Settings::default()
+        };
+        assert_eq!(
+            scope_warning(&v, &typo).as_deref(),
+            Some("경고: config의 teams(EGN)와 맞는 팀이 없어서 모든 팀에서 찾아요")
+        );
     }
 }

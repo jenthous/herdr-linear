@@ -9,7 +9,11 @@ fn main() {
             }
         }
         Err(e) => {
-            eprintln!("오류: {e:#}");
+            // 서버가 준 오류 문구가 섞일 수 있어 제어 문자를 지운다
+            eprintln!(
+                "오류: {}",
+                herdr_linear::markdown::sanitize(&format!("{e:#}"))
+            );
             std::process::exit(1);
         }
     }

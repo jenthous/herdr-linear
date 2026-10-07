@@ -12,6 +12,11 @@ pub const LINEAR_ENDPOINT: &str = "https://api.linear.app/graphql";
 /// 남은 요청이 이보다 적으면 자동 요청(주기 새로고침·서버 검색)을 멈춘다.
 pub const AUTO_PAUSE_THRESHOLD: i64 = 50;
 
+/// 연결 타임아웃.
+pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+/// 요청 하나의 전체 타임아웃. 넘으면 오프라인으로 본다.
+pub const GLOBAL_TIMEOUT: Duration = Duration::from_secs(15);
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ApiError {
     #[error("Linear API 한도를 넘었어요")]
@@ -61,9 +66,19 @@ impl LinearClient {
 
     /// 테스트에서 가짜 서버 주소를 넣을 때 쓴다.
     pub fn with_endpoint(api_key: impl Into<String>, endpoint: impl Into<String>) -> Self {
+        LinearClient::with_timeouts(api_key, endpoint, CONNECT_TIMEOUT, GLOBAL_TIMEOUT)
+    }
+
+    /// 타임아웃을 정해서 만든다. 테스트에서 짧게 줄일 때 쓴다.
+    pub fn with_timeouts(
+        api_key: impl Into<String>,
+        endpoint: impl Into<String>,
+        connect: Duration,
+        global: Duration,
+    ) -> Self {
         let agent: ureq::Agent = ureq::Agent::config_builder()
-            .timeout_connect(Some(Duration::from_secs(5)))
-            .timeout_global(Some(Duration::from_secs(15)))
+            .timeout_connect(Some(connect))
+            .timeout_global(Some(global))
             .http_status_as_error(false)
             .build()
             .into();
@@ -325,6 +340,27 @@ mod tests {
         let c = LinearClient::with_endpoint("k", "http://127.0.0.1:9/graphql");
         let err = c.execute::<Value>("{ x }", json!({})).unwrap_err();
         assert!(matches!(err, ApiError::Offline(_)), "{err:?}");
+    }
+
+    #[test]
+    fn slow_server_times_out_as_offline() {
+        // 연결은 받고 응답은 하지 않는 서버
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let _conn = listener.accept().unwrap();
+            std::thread::sleep(Duration::from_secs(5));
+        });
+        let c = LinearClient::with_timeouts(
+            "lin_api_test",
+            format!("http://{addr}/graphql"),
+            Duration::from_secs(1),
+            Duration::from_millis(300),
+        );
+        let started = std::time::Instant::now();
+        let r: Result<ViewerData, ApiError> = c.execute("query { viewer { id } }", json!({}));
+        assert!(matches!(r, Err(ApiError::Offline(_))), "{r:?}");
+        assert!(started.elapsed() < Duration::from_secs(3));
     }
 
     #[test]

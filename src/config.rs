@@ -122,25 +122,22 @@ pub fn load_settings(path: &Path) -> (Settings, Vec<String>) {
     }
     read_u64(
         &table,
-        "side",
-        "refresh_seconds",
-        0,
+        ("side", "refresh_seconds"),
+        0..=3600,
         &mut s.side_refresh_seconds,
         &mut warnings,
     );
     read_u64(
         &table,
-        "cache",
-        "retention_days",
-        1,
+        ("cache", "retention_days"),
+        1..=3650,
         &mut s.cache_retention_days,
         &mut warnings,
     );
     read_u64(
         &table,
-        "agent",
-        "include_comments",
-        0,
+        ("agent", "include_comments"),
+        0..=50,
         &mut s.agent_include_comments,
         &mut warnings,
     );
@@ -153,21 +150,23 @@ pub fn load_settings(path: &Path) -> (Settings, Vec<String>) {
     (s, warnings)
 }
 
+/// `[section] key = 정수`를 읽는다. 범위를 벗어나면 기본값을 두고 경고한다.
 fn read_u64(
     table: &toml::Table,
-    section: &str,
-    key: &str,
-    min: u64,
+    (section, key): (&str, &str),
+    range: std::ops::RangeInclusive<u64>,
     target: &mut u64,
     warnings: &mut Vec<String>,
 ) {
     let Some(v) = table.get(section).and_then(|t| t.get(key)) else {
         return;
     };
-    match v.as_integer() {
-        Some(n) if n >= min as i64 => *target = n as u64,
+    match v.as_integer().and_then(|n| u64::try_from(n).ok()) {
+        Some(n) if range.contains(&n) => *target = n,
         _ => warnings.push(format!(
-            "{section}.{key}는 {min} 이상의 정수여야 해요. 기본값을 써요"
+            "{section}.{key}는 {}~{} 사이의 정수여야 해요. 기본값을 써요",
+            range.start(),
+            range.end()
         )),
     }
 }
@@ -195,8 +194,33 @@ impl std::fmt::Debug for ApiKey {
     }
 }
 
-/// 키를 찾는다. 순서: `LINEAR_API_KEY` 환경 변수 → credentials 파일.
-pub fn resolve_api_key(env_value: Option<String>, paths: &Paths) -> Result<Option<ApiKey>> {
+/// CLI(`~/.config/herdr-linear`)와 herdr 플러그인(`~/.config/herdr/plugins/config/herdr-linear`)은
+/// 설정 디렉터리가 다르다. 한쪽에서 로그인한 키를 다른 쪽에서도 찾도록 보조로 읽는 위치.
+pub fn credential_fallbacks(home: &Path) -> Vec<PathBuf> {
+    vec![
+        home.join(".config").join(PLUGIN_ID).join("credentials"),
+        home.join(".config")
+            .join("herdr")
+            .join("plugins")
+            .join("config")
+            .join(PLUGIN_ID)
+            .join("credentials"),
+    ]
+}
+
+/// 실제 HOME 기준 보조 위치. 테스트에서는 쓰지 말고 임시 경로를 넘긴다.
+pub fn default_credential_fallbacks() -> Vec<PathBuf> {
+    std::env::var_os("HOME")
+        .map(|h| credential_fallbacks(Path::new(&h)))
+        .unwrap_or_default()
+}
+
+/// 키를 찾는다. 순서: `LINEAR_API_KEY` 환경 변수 → credentials 파일 → `fallbacks`.
+pub fn resolve_api_key(
+    env_value: Option<String>,
+    paths: &Paths,
+    fallbacks: &[PathBuf],
+) -> Result<Option<ApiKey>> {
     if let Some(v) = env_value
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
@@ -206,17 +230,26 @@ pub fn resolve_api_key(env_value: Option<String>, paths: &Paths) -> Result<Optio
             source: KeySource::Env,
         }));
     }
-    match fs::read_to_string(paths.credentials_file()) {
-        Ok(text) => {
-            let v = text.trim().to_string();
-            Ok((!v.is_empty()).then_some(ApiKey {
-                value: v,
-                source: KeySource::File,
-            }))
+    let primary = paths.credentials_file();
+    let candidates = std::iter::once(&primary).chain(fallbacks.iter().filter(|p| **p != primary));
+    for path in candidates {
+        match fs::read_to_string(path) {
+            Ok(text) => {
+                let v = text.trim();
+                if !v.is_empty() {
+                    return Ok(Some(ApiKey {
+                        value: v.to_string(),
+                        source: KeySource::File,
+                    }));
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                return Err(e).with_context(|| format!("{}을 읽지 못했어요", path.display()));
+            }
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(e).context("credentials 파일을 읽지 못했어요"),
     }
+    Ok(None)
 }
 
 /// 키를 credentials 파일에 0600 권한으로 저장한다.
@@ -229,13 +262,18 @@ pub fn save_api_key(paths: &Paths, key: &str) -> Result<()> {
     write_private_file(&paths.credentials_file(), format!("{key}\n").as_bytes())
 }
 
-/// credentials 파일을 지운다. 없으면 아무것도 하지 않는다.
-pub fn delete_credentials(paths: &Paths) -> Result<()> {
-    match fs::remove_file(paths.credentials_file()) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e).context("credentials 파일을 지우지 못했어요"),
+/// credentials 파일과 보조 위치의 키를 모두 지운다. 없으면 건너뛴다.
+pub fn delete_credentials(paths: &Paths, fallbacks: &[PathBuf]) -> Result<()> {
+    for path in std::iter::once(&paths.credentials_file()).chain(fallbacks) {
+        match fs::remove_file(path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                return Err(e).with_context(|| format!("{}을 지우지 못했어요", path.display()));
+            }
+        }
     }
+    Ok(())
 }
 
 /// 디렉터리를 만들고(없으면) 권한을 0700으로 맞춘다.
@@ -408,7 +446,7 @@ mod tests {
     fn env_key_wins_over_file() {
         let (_d, paths) = temp_paths();
         save_api_key(&paths, "lin_api_file").unwrap();
-        let k = resolve_api_key(Some(" lin_api_env ".into()), &paths)
+        let k = resolve_api_key(Some(" lin_api_env ".into()), &paths, &[])
             .unwrap()
             .unwrap();
         assert_eq!(k.value, "lin_api_env");
@@ -419,7 +457,9 @@ mod tests {
     fn file_key_used_when_env_empty() {
         let (_d, paths) = temp_paths();
         save_api_key(&paths, "  lin_api_file  ").unwrap();
-        let k = resolve_api_key(Some("".into()), &paths).unwrap().unwrap();
+        let k = resolve_api_key(Some("".into()), &paths, &[])
+            .unwrap()
+            .unwrap();
         assert_eq!(k.value, "lin_api_file");
         assert_eq!(k.source, KeySource::File);
     }
@@ -427,10 +467,10 @@ mod tests {
     #[test]
     fn missing_or_blank_file_means_no_key() {
         let (_d, paths) = temp_paths();
-        assert_eq!(resolve_api_key(None, &paths).unwrap(), None);
+        assert_eq!(resolve_api_key(None, &paths, &[]).unwrap(), None);
         fs::create_dir_all(&paths.config_dir).unwrap();
         fs::write(paths.credentials_file(), "  \n").unwrap();
-        assert_eq!(resolve_api_key(None, &paths).unwrap(), None);
+        assert_eq!(resolve_api_key(None, &paths, &[]).unwrap(), None);
     }
 
     #[test]
@@ -463,9 +503,9 @@ mod tests {
     fn delete_is_idempotent() {
         let (_d, paths) = temp_paths();
         save_api_key(&paths, "lin_api_x").unwrap();
-        delete_credentials(&paths).unwrap();
-        delete_credentials(&paths).unwrap();
-        assert_eq!(resolve_api_key(None, &paths).unwrap(), None);
+        delete_credentials(&paths, &[]).unwrap();
+        delete_credentials(&paths, &[]).unwrap();
+        assert_eq!(resolve_api_key(None, &paths, &[]).unwrap(), None);
     }
 
     #[test]
@@ -477,5 +517,60 @@ mod tests {
         let shown = format!("{k:?}");
         assert!(!shown.contains("secret"));
         assert!(shown.contains("<redacted>"));
+    }
+
+    #[test]
+    fn out_of_range_values_fall_back() {
+        let (_d, paths) = temp_paths();
+        fs::create_dir_all(&paths.config_dir).unwrap();
+        fs::write(
+            paths.config_file(),
+            "[side]\nrefresh_seconds = 99999\n[cache]\nretention_days = 99999999999\n[agent]\ninclude_comments = -1\n",
+        )
+        .unwrap();
+        let (s, w) = load_settings(&paths.config_file());
+        assert_eq!(s, Settings::default());
+        assert_eq!(w.len(), 3, "{w:?}");
+        assert!(w.iter().any(|m| m.contains("1~3650")), "{w:?}");
+    }
+
+    #[test]
+    fn fallback_credentials_are_found() {
+        let (d, paths) = temp_paths();
+        let other = d.path().join("other").join("credentials");
+        fs::create_dir_all(other.parent().unwrap()).unwrap();
+        fs::write(&other, "lin_api_other\n").unwrap();
+        let k = resolve_api_key(None, &paths, std::slice::from_ref(&other))
+            .unwrap()
+            .unwrap();
+        assert_eq!(k.value, "lin_api_other");
+        // 주 위치에 키가 있으면 그쪽이 먼저다
+        save_api_key(&paths, "lin_api_primary").unwrap();
+        let k = resolve_api_key(None, &paths, &[other]).unwrap().unwrap();
+        assert_eq!(k.value, "lin_api_primary");
+    }
+
+    #[test]
+    fn delete_removes_fallback_keys_too() {
+        let (d, paths) = temp_paths();
+        let other = d.path().join("other").join("credentials");
+        fs::create_dir_all(other.parent().unwrap()).unwrap();
+        fs::write(&other, "lin_api_other\n").unwrap();
+        save_api_key(&paths, "lin_api_primary").unwrap();
+        delete_credentials(&paths, std::slice::from_ref(&other)).unwrap();
+        assert!(!paths.credentials_file().exists());
+        assert!(!other.exists());
+    }
+
+    #[test]
+    fn fallback_locations_cover_cli_and_plugin() {
+        let f = credential_fallbacks(Path::new("/home/me"));
+        assert_eq!(
+            f,
+            vec![
+                PathBuf::from("/home/me/.config/herdr-linear/credentials"),
+                PathBuf::from("/home/me/.config/herdr/plugins/config/herdr-linear/credentials"),
+            ]
+        );
     }
 }
