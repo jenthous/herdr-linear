@@ -18,6 +18,12 @@ cargo build --release
 herdr plugin link .
 ```
 
+이 기기에서 매일 쓸 때는 배포 스크립트를 써요. 빌드한 플러그인을 `~/.local/share/herdr-linear/plugin`에 복사해 herdr에 연결하고, `herdr-linear` 명령도 `~/.local/bin`에 연결해요. 그 뒤로는 저장소에서 개발해도 쓰고 있는 플러그인이 바뀌지 않아요. 다시 배포하면 새 버전이 들어가요.
+
+```sh
+scripts/deploy-local.sh
+```
+
 ## API 키
 
 Linear → Settings → Security & access → Personal API keys에서 키를 만들어요.
