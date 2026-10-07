@@ -302,7 +302,8 @@ pub struct IssueDetail {
     pub comments: Vec<Comment>,
     /// 코멘트가 50개를 넘는지.
     pub more_comments: bool,
-    pub relations: IssueRelations,
+    /// 관계. 관계 없이 다시 받았으면 `None`(모름)
+    pub relations: Option<IssueRelations>,
 }
 
 #[cfg(test)]

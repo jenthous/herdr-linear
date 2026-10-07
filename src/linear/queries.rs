@@ -103,7 +103,23 @@ pub fn deep_search(
 }
 
 /// 이슈, 코멘트, 하위·관계. 이슈가 없으면 `None`.
+/// 관계 때문에 요청이 실패하면 관계 없이 한 번 더 받고, 그때 `relations`는 `None`(모름)이다.
 pub fn issue_detail(c: &LinearClient, id: &str) -> Result<Option<IssueDetail>, ApiError> {
+    let result = match detail_query(c, id, true) {
+        // 볼 수 없는 팀의 이슈와 맺은 관계처럼 관계 필드 때문에 응답 전체가 오류가 될 수 있다.
+        // 관계 없이 한 번 더 받아 상세는 보이게 하고, 없는 이슈인지도 그 응답으로 판단한다
+        Err(ApiError::GraphQl(_) | ApiError::Decode(_)) => detail_query(c, id, false),
+        other => other,
+    };
+    match result {
+        Ok(d) => Ok(Some(d)),
+        Err(ApiError::GraphQl(msg)) if is_not_found(&msg) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// 상세 요청 한 번. `with_relations`가 거짓이면 하위·관계 필드를 빼고 받고, `relations`는 `None`이다.
+fn detail_query(c: &LinearClient, id: &str, with_relations: bool) -> Result<IssueDetail, ApiError> {
     #[derive(Deserialize)]
     struct D {
         issue: DetailIssue,
@@ -134,40 +150,45 @@ pub fn issue_detail(c: &LinearClient, id: &str) -> Result<Option<IssueDetail>, A
         nodes: Vec<Value>,
         page_info: PageInfo,
     }
+    // 관계 필드는 코멘트 블록 바로 뒤에 붙는다. 빼면 이슈 선택이 거기서 닫힌다
+    let relation_fields = if with_relations {
+        format!(
+            " children(first: {RELATION_PAGE_SIZE}) {{ nodes {{ {RELATED_SELECTION} subIssueSortOrder }} pageInfo {{ hasNextPage }} }} \
+             relations(first: {RELATION_PAGE_SIZE}) {{ nodes {{ type relatedIssue {{ {RELATED_SELECTION} }} }} }} \
+             inverseRelations(first: {RELATION_PAGE_SIZE}) {{ nodes {{ type issue {{ {RELATED_SELECTION} }} }} }}"
+        )
+    } else {
+        String::new()
+    };
     let q = format!(
         "query Detail($id: String!, $first: Int) {{ issue(id: $id) {{ ...IssueFields \
-         comments(first: $first) {{ nodes {{ id body createdAt editedAt user {{ id name displayName }} }} pageInfo {{ hasNextPage endCursor }} }} \
-         children(first: {RELATION_PAGE_SIZE}) {{ nodes {{ {RELATED_SELECTION} subIssueSortOrder }} pageInfo {{ hasNextPage }} }} \
-         relations(first: {RELATION_PAGE_SIZE}) {{ nodes {{ type relatedIssue {{ {RELATED_SELECTION} }} }} }} \
-         inverseRelations(first: {RELATION_PAGE_SIZE}) {{ nodes {{ type issue {{ {RELATED_SELECTION} }} }} }} }} }} {}",
+         comments(first: $first) {{ nodes {{ id body createdAt editedAt user {{ id name displayName }} }} pageInfo {{ hasNextPage endCursor }} }}{relation_fields} }} }} {}",
         issue_fragment()
     );
-    match c.execute::<D>(&q, json!({ "id": id, "first": COMMENT_PAGE_SIZE })) {
-        Ok(d) => {
-            let mut comments = d.issue.comments.nodes;
-            comments.sort_by(|a, b| a.created_at.cmp(&b.created_at));
-            let (children, more_children) = d.issue.children.map_or((Vec::new(), false), |p| {
-                (p.nodes, p.page_info.has_next_page)
-            });
-            let relations = relations_from(
-                children,
-                more_children,
-                d.issue.relations.map(|n| n.nodes).unwrap_or_default(),
-                d.issue
-                    .inverse_relations
-                    .map(|n| n.nodes)
-                    .unwrap_or_default(),
-            );
-            Ok(Some(IssueDetail {
-                issue: d.issue.issue,
-                comments,
-                more_comments: d.issue.comments.page_info.has_next_page,
-                relations,
-            }))
-        }
-        Err(ApiError::GraphQl(msg)) if is_not_found(&msg) => Ok(None),
-        Err(e) => Err(e),
-    }
+    let d = c.execute::<D>(&q, json!({ "id": id, "first": COMMENT_PAGE_SIZE }))?;
+    let mut comments = d.issue.comments.nodes;
+    comments.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+    // 관계 필드가 없는 응답도 관계를 요청했다면 빈 관계다
+    let relations = with_relations.then(|| {
+        let (children, more_children) = d.issue.children.map_or((Vec::new(), false), |p| {
+            (p.nodes, p.page_info.has_next_page)
+        });
+        relations_from(
+            children,
+            more_children,
+            d.issue.relations.map(|n| n.nodes).unwrap_or_default(),
+            d.issue
+                .inverse_relations
+                .map(|n| n.nodes)
+                .unwrap_or_default(),
+        )
+    });
+    Ok(IssueDetail {
+        issue: d.issue.issue,
+        comments,
+        more_comments: d.issue.comments.page_info.has_next_page,
+        relations,
+    })
 }
 
 /// 하위 노드 하나.
@@ -419,7 +440,7 @@ mod tests {
         assert!(d.more_comments);
         assert_eq!(
             d.relations,
-            IssueRelations::default(),
+            Some(IssueRelations::default()),
             "관계 필드가 없는 응답은 빈 관계"
         );
     }
@@ -510,7 +531,7 @@ mod tests {
                 .map(|i| i.identifier.clone())
                 .collect::<Vec<_>>()
         };
-        let r = &d.relations;
+        let r = d.relations.as_ref().unwrap();
         assert_eq!(
             ids(&r.children),
             vec!["ENG-11", "ENG-12", "ENG-13"],
@@ -549,5 +570,128 @@ mod tests {
             .create();
         issue_detail(&client(&server), "ENG-1").unwrap();
         m.assert();
+    }
+
+    /// 관계 필드를 넣은 상세 요청의 본문.
+    fn relation_query_body() -> Matcher {
+        Matcher::Regex("inverseRelations".into())
+    }
+
+    /// 관계 필드를 뺀 상세 요청의 본문. 이슈 선택이 코멘트 블록 바로 뒤에서 닫힌다.
+    fn plain_query_body() -> Matcher {
+        Matcher::Regex(r"endCursor \} \} \} \}".into())
+    }
+
+    /// 코멘트가 없는 상세 응답의 이슈.
+    fn plain_detail_issue() -> Value {
+        let mut issue = IssueBuilder::new("i1", "ENG-1", "상세").json();
+        issue["comments"] =
+            json!({ "nodes": [], "pageInfo": { "hasNextPage": false, "endCursor": null } });
+        issue
+    }
+
+    #[test]
+    fn relation_error_falls_back_to_detail_without_relations() {
+        // 볼 수 없는 팀의 이슈와 맺은 관계처럼 관계 필드 때문에 Linear가 응답 전체를 오류로 줄 때.
+        // "찾을 수 없음"처럼 보여도 있는 이슈를 없는 이슈로 다루면 안 된다
+        let cases = [
+            (400, "Entity not found: Issue"),
+            (200, "Entity not found: Issue"),
+            (200, "Something went wrong"),
+        ];
+        for (status, message) in cases {
+            let mut server = mockito::Server::new();
+            let relation_request = server
+                .mock("POST", "/graphql")
+                .match_body(relation_query_body())
+                .with_status(status)
+                .with_body(json!({ "errors": [{ "message": message }] }).to_string())
+                .expect(1)
+                .create();
+            let mut issue = plain_detail_issue();
+            issue["comments"]["nodes"] = json!([
+                { "id": "c1", "body": "첫 번째", "createdAt": "2026-10-01T00:00:00.000Z", "editedAt": null, "user": null }
+            ]);
+            let plain_request = server
+                .mock("POST", "/graphql")
+                .match_body(plain_query_body())
+                .with_body(json!({ "data": { "issue": issue } }).to_string())
+                .expect(1)
+                .create();
+            let found = issue_detail(&client(&server), "ENG-1").unwrap();
+            assert!(
+                found.is_some(),
+                "{status} {message}: 있는 이슈를 없는 이슈로 다뤘어요"
+            );
+            let d = found.unwrap();
+            assert_eq!(d.issue.identifier, "ENG-1", "{status} {message}");
+            assert_eq!(d.comments.len(), 1, "{status} {message}: 코멘트는 그대로");
+            assert_eq!(d.relations, None, "{status} {message}: 관계는 모름");
+            relation_request.assert();
+            plain_request.assert();
+        }
+    }
+
+    #[test]
+    fn undecodable_relations_fall_back_to_detail_without_relations() {
+        // 하위 목록에 pageInfo가 없는 모양처럼 관계 필드를 읽지 못할 때
+        let mut server = mockito::Server::new();
+        let mut broken = plain_detail_issue();
+        broken["children"] = json!({ "nodes": [] });
+        let relation_request = server
+            .mock("POST", "/graphql")
+            .match_body(relation_query_body())
+            .with_body(json!({ "data": { "issue": broken } }).to_string())
+            .expect(1)
+            .create();
+        let plain_request = server
+            .mock("POST", "/graphql")
+            .match_body(plain_query_body())
+            .with_body(json!({ "data": { "issue": plain_detail_issue() } }).to_string())
+            .expect(1)
+            .create();
+        let d = issue_detail(&client(&server), "ENG-1").unwrap().unwrap();
+        assert_eq!(d.issue.identifier, "ENG-1");
+        assert_eq!(d.relations, None);
+        relation_request.assert();
+        plain_request.assert();
+    }
+
+    #[test]
+    fn auth_rate_limit_and_offline_errors_are_not_retried() {
+        let auth = r#"{"errors":[{"message":"Authentication required","extensions":{"code":"AUTHENTICATION_ERROR"}}]}"#;
+        let limited =
+            r#"{"errors":[{"message":"Rate limit exceeded","extensions":{"code":"RATELIMITED"}}]}"#;
+        // 오류 종류만 비교한다 (안의 값은 보지 않는다)
+        let cases = [
+            (400, auth, ApiError::Auth),
+            (400, limited, ApiError::RateLimited { reset_at_ms: None }),
+            (503, "busy", ApiError::Offline(String::new())),
+        ];
+        for (status, body, expected) in cases {
+            let mut server = mockito::Server::new();
+            let relation_request = server
+                .mock("POST", "/graphql")
+                .match_body(relation_query_body())
+                .with_status(status)
+                .with_body(body)
+                .expect(1)
+                .create();
+            // 관계 없는 요청이 가면 안 된다
+            let plain_request = server
+                .mock("POST", "/graphql")
+                .match_body(plain_query_body())
+                .with_body(json!({ "data": { "issue": plain_detail_issue() } }).to_string())
+                .expect(0)
+                .create();
+            let err = issue_detail(&client(&server), "ENG-1").unwrap_err();
+            assert_eq!(
+                std::mem::discriminant(&err),
+                std::mem::discriminant(&expected),
+                "{status} {body}: {err:?}"
+            );
+            relation_request.assert();
+            plain_request.assert();
+        }
     }
 }
