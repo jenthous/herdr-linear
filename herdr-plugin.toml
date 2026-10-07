@@ -1,0 +1,44 @@
+id = "herdr-linear"
+name = "Linear"
+version = "0.1.0"
+min_herdr_version = "0.9.3"
+description = "Fast Linear lookup in herdr: search, read, and open issues from a palette."
+platforms = ["macos", "linux"]
+
+[[build]]
+command = ["cargo", "build", "--release"]
+
+[[actions]]
+id = "palette"
+title = "Linear: 검색 팔레트"
+description = "Linear 이슈 검색 팔레트를 연다 (이슈 식별자를 선택해 두면 그 이슈를 바로 연다)"
+contexts = ["global", "workspace", "pane", "selection"]
+command = ["./target/release/herdr-linear", "open", "palette"]
+
+[[actions]]
+id = "open-url"
+title = "Linear: 링크로 이슈 열기"
+description = "Ctrl+클릭한 linear.app 이슈 링크를 팔레트에서 연다"
+contexts = ["global", "workspace", "pane"]
+command = ["./target/release/herdr-linear", "open", "url"]
+
+[[actions]]
+id = "logout"
+title = "Linear: 로그아웃"
+description = "저장된 API 키와 캐시를 지운다"
+contexts = ["global"]
+command = ["./target/release/herdr-linear", "logout"]
+
+[[panes]]
+id = "palette"
+title = "Linear"
+placement = "popup"
+width = "80%"
+height = "80%"
+command = ["./target/release/herdr-linear", "ui", "--mode", "palette"]
+
+[[link_handlers]]
+id = "linear-issue"
+title = "Linear 이슈 열기"
+pattern = "^https://linear\\.app/[^/]+/issue/[A-Za-z0-9]+-[0-9]+"
+action = "open-url"

@@ -1,4 +1,4 @@
-//! 터미널 조회 명령: login, logout, whoami, mine, search, show.
+//! 명령: login, logout, whoami, mine, search, show와 herdr용 open, ui.
 
 use std::io::IsTerminal;
 
@@ -6,6 +6,8 @@ use anyhow::{Result, anyhow, bail};
 use clap::{Parser, Subcommand};
 
 use crate::config::{self, KeySource, Paths, Settings};
+use crate::context::{Origin, PluginContext};
+use crate::herdr::{Herdr, open_palette};
 use crate::linear::client::{ApiError, LinearClient};
 use crate::linear::filter::{build_issue_filter, token_filter};
 use crate::linear::queries;
@@ -54,6 +56,29 @@ pub enum Command {
     },
     /// 이슈 상세 (예: ENG-131)
     Show { id: String },
+    /// herdr 액션: 원래 pane의 맥락을 넘겨 팔레트를 띄운다
+    Open {
+        /// palette: 단축키·명령 팔레트, url: Linear 이슈 링크 Ctrl+클릭
+        #[arg(value_enum)]
+        target: OpenTarget,
+    },
+    /// herdr pane 안에서 도는 화면
+    Ui {
+        #[arg(long, value_enum)]
+        mode: UiMode,
+    },
+}
+
+/// 둘 다 같은 팔레트를 띄운다. 링크 클릭이면 컨텍스트의 `clicked_url` 이슈로 바로 연다.
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OpenTarget {
+    Palette,
+    Url,
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UiMode {
+    Palette,
 }
 
 /// 명령 실행에 필요한 것들.
@@ -92,10 +117,8 @@ impl Ctx {
             &config::default_credential_fallbacks(),
         )?
         .ok_or_else(|| anyhow!("API 키가 없어요. 먼저 `herdr-linear login`을 실행하세요"))?;
-        let store = open_cache(&paths)?;
         let now = now_ms();
-        let retention = (settings.cache_retention_days as i64).saturating_mul(DAY_MS);
-        store.evict_older_than(now.saturating_sub(retention))?;
+        let store = open_store(&paths, &settings, now)?;
         let width = ratatui::crossterm::terminal::size()
             .map(|(w, _)| w)
             .unwrap_or(100)
@@ -121,7 +144,27 @@ pub fn run(cli: Cli) -> Result<String> {
     let paths = Paths::from_env()?;
     match cli.command {
         Command::Login => return login(&paths),
-        Command::Logout => return logout(&paths, &config::default_credential_fallbacks()),
+        Command::Logout => {
+            let out = logout(&paths, &config::default_credential_fallbacks())?;
+            // herdr 액션으로 실행되면 출력이 보이지 않으니 알림으로 알린다
+            if std::env::var_os("HERDR_PLUGIN_ACTION_ID").is_some() {
+                let _ = Herdr::from_env().notify("Linear", &out);
+            }
+            return Ok(out);
+        }
+        Command::Open { .. } => {
+            let ctx = PluginContext::parse(
+                &std::env::var("HERDR_PLUGIN_CONTEXT_JSON").unwrap_or_default(),
+            );
+            open_palette(&Herdr::from_env(), &Origin::from_context(&ctx))?;
+            return Ok(String::new());
+        }
+        Command::Ui {
+            mode: UiMode::Palette,
+        } => {
+            crate::tui::palette(paths)?;
+            return Ok(String::new());
+        }
         _ => {}
     }
     let ctx = Ctx::open(paths)?;
@@ -130,7 +173,9 @@ pub fn run(cli: Cli) -> Result<String> {
         Command::Mine => mine(&ctx),
         Command::Search { deep, query } => search(&ctx, &query.join(" "), deep),
         Command::Show { id } => show(&ctx, &id),
-        Command::Login | Command::Logout => Ok(String::new()),
+        Command::Login | Command::Logout | Command::Open { .. } | Command::Ui { .. } => {
+            Ok(String::new())
+        }
     };
     if std::env::var_os("HERDR_LINEAR_DEBUG").is_some() {
         let r = ctx.client.rate_limit();
@@ -184,6 +229,14 @@ fn open_cache(paths: &Paths) -> Result<Store> {
         eprintln!("경고: 캐시를 열지 못해 이번에는 저장 없이 실행해요 ({e:#})");
         Store::open_in_memory()
     })
+}
+
+/// 캐시를 열고 보관 기간(`cache.retention_days`)이 지난 이슈를 지운다.
+pub fn open_store(paths: &Paths, settings: &Settings, now: i64) -> Result<Store> {
+    let store = open_cache(paths)?;
+    let retention = (settings.cache_retention_days as i64).saturating_mul(DAY_MS);
+    store.evict_older_than(now.saturating_sub(retention))?;
+    Ok(store)
 }
 
 /// 키(보조 위치 포함)와 캐시를 지운다. `fallbacks`는 실제 실행에서만 HOME 기준 위치를 넘긴다.
@@ -679,6 +732,34 @@ mod tests {
             }
         );
         assert!(Cli::try_parse_from(["herdr-linear", "search"]).is_err());
+    }
+
+    #[test]
+    fn cli_parses_herdr_commands() {
+        let parse = |args: &[&str]| {
+            Cli::try_parse_from(std::iter::once("herdr-linear").chain(args.iter().copied()))
+                .map(|c| c.command)
+        };
+        assert_eq!(
+            parse(&["open", "palette"]).unwrap(),
+            Command::Open {
+                target: OpenTarget::Palette
+            }
+        );
+        assert_eq!(
+            parse(&["open", "url"]).unwrap(),
+            Command::Open {
+                target: OpenTarget::Url
+            }
+        );
+        assert_eq!(
+            parse(&["ui", "--mode", "palette"]).unwrap(),
+            Command::Ui {
+                mode: UiMode::Palette
+            }
+        );
+        assert!(parse(&["open", "side"]).is_err(), "사이드 패널은 3부");
+        assert!(parse(&["ui"]).is_err());
     }
 
     #[test]
