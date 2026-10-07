@@ -36,7 +36,7 @@ pub fn palette(paths: Paths) -> Result<()> {
     };
     if !warnings.is_empty() {
         app.apply(
-            Msg::Flash(format!("설정 경고: {}", warnings.join(" · "))),
+            Msg::Warn(format!("설정 경고: {}", warnings.join(" · "))),
             now,
         );
     }

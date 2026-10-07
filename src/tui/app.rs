@@ -15,6 +15,8 @@ pub const SEARCH_DEBOUNCE_MS: i64 = 300;
 pub const FLASH_MS: i64 = 3_000;
 /// 깊은 검색이 분당 한도에 걸렸을 때 안내.
 pub const DEEP_LIMIT_TEXT: &str = "깊은 검색은 분당 30회까지예요. 잠시 뒤 다시 시도하세요";
+/// 설정·범위 경고를 보여주는 시간. 일반 안내보다 길다.
+pub const WARN_MS: i64 = 10_000;
 /// 검색 결과로 보여줄 최대 줄 수.
 const MAX_RESULTS: usize = 200;
 
@@ -182,6 +184,8 @@ pub enum Msg {
     /// 깊은 검색이 분당 한도에 걸렸다. 세어 둔 요청 하나를 끝내고 안내만 한다
     DeepLimited,
     Flash(String),
+    /// 설정·범위 경고. 일반 안내보다 오래 보이고 그것에 덮이지 않는다
+    Warn(String),
 }
 
 /// 상단에 보이는 문제 상태. 한도 초과는 하단에 잠깐 알리기만 해서 여기 없다.
@@ -278,6 +282,8 @@ pub struct App {
     pub problem: Option<Problem>,
     /// (문구, 보여줄 마지막 시각)
     pub flash: Option<(String, i64)>,
+    /// (경고 문구, 보여줄 마지막 시각)
+    pub warning: Option<(String, i64)>,
     pub quit: bool,
     pub viewer: Option<Viewer>,
     index: SearchIndex,
@@ -310,6 +316,7 @@ impl App {
             updated_at: None,
             problem: None,
             flash: None,
+            warning: None,
             quit: false,
             viewer: None,
             index: SearchIndex::new(Vec::new()),
@@ -384,6 +391,13 @@ impl App {
 
     pub fn flash_text(&self, now: i64) -> Option<&str> {
         self.flash
+            .as_ref()
+            .filter(|(_, until)| now < *until)
+            .map(|(t, _)| t.as_str())
+    }
+
+    pub fn warning_text(&self, now: i64) -> Option<&str> {
+        self.warning
             .as_ref()
             .filter(|(_, until)| now < *until)
             .map(|(t, _)| t.as_str())
@@ -1049,6 +1063,14 @@ impl App {
                 self.set_flash(DEEP_LIMIT_TEXT, now);
             }
             Msg::Flash(text) => self.set_flash(text, now),
+            Msg::Warn(text) => {
+                // 아직 보이는 경고가 있으면 이어 붙인다 (설정 경고 뒤에 범위 경고가 오는 경우)
+                let text = match self.warning_text(now) {
+                    Some(prev) => format!("{prev} · {text}"),
+                    None => text,
+                };
+                self.warning = Some((text, now + WARN_MS));
+            }
         }
         Vec::new()
     }
@@ -1798,5 +1820,18 @@ mod tests {
         app.handle(Input::Act(Act::Quit), T0);
         assert!(app.quit);
         assert_eq!(app.query, "", "검색어에 들어가지 않는다");
+    }
+
+    #[test]
+    fn warnings_join_and_outlast_flashes() {
+        let mut app = App::onboarding(false);
+        app.apply(Msg::Warn("설정 경고: A".into()), T0);
+        app.apply(Msg::Warn("경고: B".into()), T0 + 1_000);
+        app.apply(Msg::Flash("복사됨: ENG-1".into()), T0 + 1_000);
+        assert_eq!(
+            app.warning_text(T0 + 1_000 + FLASH_MS),
+            Some("설정 경고: A · 경고: B")
+        );
+        assert_eq!(app.warning_text(T0 + 1_000 + WARN_MS), None);
     }
 }

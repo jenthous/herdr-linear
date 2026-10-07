@@ -66,6 +66,16 @@ pub fn draw(f: &mut Frame, app: &App, now: i64) -> Drawn {
     let area = f.area();
     if app.mode == Mode::Onboarding {
         draw_onboarding(f, app, area);
+        // 키 입력 화면에는 하단 줄이 없으니 경고만 맨 아래에 보인다
+        if let Some(text) = app.warning_text(now) {
+            let last = Rect {
+                y: area.bottom().saturating_sub(1),
+                height: area.height.min(1),
+                ..area
+            };
+            let text = truncate(&format!(" {}", sanitize(text)), usize::from(area.width));
+            f.render_widget(Paragraph::new(Span::styled(text, WARN)), last);
+        }
         return Drawn::default();
     }
     let [header, search, body, footer] = Layout::vertical([
@@ -451,6 +461,8 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect, now: i64) {
             format!(" {}", sanitize(text)),
             Style::new().fg(Color::Green),
         )
+    } else if let Some(text) = app.warning_text(now) {
+        Span::styled(format!(" {}", sanitize(text)), WARN)
     } else {
         match &app.problem {
             Some(Problem::Offline(m)) => Span::styled(
@@ -1063,5 +1075,30 @@ mod tests {
         assert!(clean(&issue_header(&issue, 80)));
         let a = detail_of(issue, Vec::new());
         assert!(clean(&detail_lines(a.detail.as_ref().unwrap(), 80, &[])));
+    }
+
+    #[test]
+    fn warnings_show_on_the_key_screen_and_after_a_flash() {
+        let mut onboarding = App::onboarding(false);
+        onboarding.apply(
+            Msg::Warn("설정 경고: teams는 문자열 배열이어야 해요".into()),
+            T0,
+        );
+        let (rows, _, _) = screen(&onboarding, 80, 14);
+        assert_eq!(rows[13], " 설정 경고: teams는 문자열 배열이어야 해요");
+        let mut a = app();
+        a.apply(Msg::Warn("경고: teams 확인".into()), T0 - 5_000);
+        a.apply(Msg::Flash("복사됨: ENG-1".into()), T0 - 4_000);
+        let (rows, _, _) = screen(&a, 80, 12);
+        assert_eq!(rows[11], " 경고: teams 확인", "안내가 사라진 뒤에도 남는다");
+    }
+
+    #[test]
+    fn tiny_key_screen_with_a_warning_does_not_panic() {
+        let mut a = App::onboarding(false);
+        a.apply(Msg::Warn("설정 경고: 아주 긴 경고 문구".into()), T0);
+        for (w, h) in [(1, 1), (5, 3), (12, 4), (20, 5)] {
+            screen(&a, w, h);
+        }
     }
 }

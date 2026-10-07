@@ -481,7 +481,7 @@ impl Runtime {
         self.scope_warned |= warning.is_some();
         self.viewer = Some(v.clone());
         let mut msgs = vec![Msg::Viewer(v)];
-        msgs.extend(warning.map(Msg::Flash));
+        msgs.extend(warning.map(Msg::Warn));
         msgs
     }
 
