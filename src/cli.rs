@@ -15,7 +15,8 @@ use crate::search::query::parse;
 use crate::search::rank::{SearchIndex, merge, sort_mine};
 use crate::store::{Store, remove_db_files};
 use crate::ui::row::issue_row;
-pub use crate::ui::style::{priority_label, state_icon};
+use crate::ui::style::local_time;
+pub use crate::ui::style::{ago, priority_label, state_icon};
 
 const VIEWER_TTL_MS: i64 = 60 * 60 * 1000;
 const DAY_MS: i64 = 24 * 60 * 60 * 1000;
@@ -416,16 +417,6 @@ pub fn show(ctx: &Ctx, id: &str) -> Result<String> {
     }
 }
 
-pub fn ago(now_ms: i64, then_ms: i64) -> String {
-    let mins = (now_ms - then_ms).max(0) / 60_000;
-    match mins {
-        0 => "방금".to_string(),
-        m if m < 60 => format!("{m}분 전"),
-        m if m < 60 * 24 => format!("{}시간 전", m / 60),
-        m => format!("{}일 전", m / (60 * 24)),
-    }
-}
-
 /// API 오류를 사용자 문구로 바꾼다.
 /// 한도 초과면 언제 다시 시도할지, 환경 변수 키가 틀렸으면 그 사실을 알려준다.
 fn api_error(ctx: &Ctx, e: ApiError) -> anyhow::Error {
@@ -569,7 +560,7 @@ fn format_detail(
             out.push(String::new());
             out.push(markdown::sanitize(&format!(
                 "{who} · {}",
-                short_time(&c.created_at)
+                local_time(&c.created_at)
             )));
             out.push(render_md(ctx, &c.body, &theme, team_keys));
         }
@@ -595,16 +586,6 @@ fn render_md(ctx: &Ctx, md: &str, theme: &Theme, team_keys: &[String]) -> String
         }
     }
     text
-}
-
-fn short_time(rfc3339: &str) -> String {
-    chrono::DateTime::parse_from_rfc3339(rfc3339)
-        .map(|t| {
-            t.with_timezone(&chrono::Local)
-                .format("%Y-%m-%d %H:%M")
-                .to_string()
-        })
-        .unwrap_or_else(|_| rfc3339.to_string())
 }
 
 #[cfg(test)]

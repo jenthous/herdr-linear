@@ -83,6 +83,18 @@ pub fn render_with(md: &str, width: u16, theme: &Theme, team_keys: &[String]) ->
     r.finish()
 }
 
+/// markdown이 아닌 평문을 폭에 맞춰 줄바꿈한다 (제목처럼 긴 한 줄용).
+pub fn wrap_text(text: &str, width: u16, style: Style) -> Vec<Line<'static>> {
+    let text = sanitize(&text.nfc().collect::<String>());
+    wrap(
+        &[(text, style)],
+        &[],
+        &[],
+        usize::from(width).max(10),
+        false,
+    )
+}
+
 /// 스타일 없이 텍스트만 (테스트·파이프 출력용).
 pub fn to_plain(lines: &[Line<'_>]) -> String {
     lines

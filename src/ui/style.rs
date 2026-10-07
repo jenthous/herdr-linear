@@ -68,6 +68,28 @@ pub fn priority_label(p: i64) -> &'static str {
     }
 }
 
+/// "방금", "5분 전", "3시간 전", "2일 전".
+pub fn ago(now_ms: i64, then_ms: i64) -> String {
+    let mins = (now_ms - then_ms).max(0) / 60_000;
+    match mins {
+        0 => "방금".to_string(),
+        m if m < 60 => format!("{m}분 전"),
+        m if m < 60 * 24 => format!("{}시간 전", m / 60),
+        m => format!("{}일 전", m / (60 * 24)),
+    }
+}
+
+/// RFC 3339 시각을 로컬 시간 "YYYY-MM-DD HH:MM"으로. 해석하지 못하면 그대로.
+pub fn local_time(rfc3339: &str) -> String {
+    chrono::DateTime::parse_from_rfc3339(rfc3339)
+        .map(|t| {
+            t.with_timezone(&chrono::Local)
+                .format("%Y-%m-%d %H:%M")
+                .to_string()
+        })
+        .unwrap_or_else(|_| rfc3339.to_string())
+}
+
 /// 표시 폭 `width`에 맞게 자른다. 넘치면 끝을 `…`로 바꾼다.
 pub fn truncate(s: &str, width: usize) -> String {
     if s.width() <= width {

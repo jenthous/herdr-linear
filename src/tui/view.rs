@@ -1,0 +1,708 @@
+//! 팔레트 그리기.
+
+use ratatui::Frame;
+use ratatui::layout::{Constraint, Layout, Position, Rect};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
+use unicode_width::UnicodeWidthStr;
+
+use super::app::{App, Mode, Problem, Row, Tab};
+use crate::linear::types::Issue;
+use crate::markdown::{self, Theme, sanitize};
+use crate::ui::row::issue_row;
+use crate::ui::style::{
+    ACCENT, DIM, ago, label_style, local_time, priority_label, state_icon, state_style, truncate,
+};
+
+/// 이 폭 이상이면 목록 옆에 미리보기를 붙인다.
+pub const PREVIEW_MIN_WIDTH: u16 = 100;
+
+const SELECTED_BG: Style = Style::new().bg(Color::Rgb(45, 45, 60));
+const WARN: Style = Style::new().fg(Color::Yellow);
+const ERROR: Style = Style::new().fg(Color::Red);
+
+/// 그린 결과.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Drawn {
+    /// 상세 화면이면 최대 스크롤
+    pub detail_max_scroll: Option<u16>,
+}
+
+/// 화면 전체를 그린다.
+pub fn draw(f: &mut Frame, app: &App, now: i64) -> Drawn {
+    let area = f.area();
+    if app.mode == Mode::Onboarding {
+        draw_onboarding(f, app, area);
+        return Drawn::default();
+    }
+    let [header, search, body, footer] = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Min(1),
+        Constraint::Length(1),
+    ])
+    .areas(area);
+    draw_header(f, app, header, now);
+    let mut drawn = Drawn::default();
+    if app.mode == Mode::Detail {
+        drawn.detail_max_scroll = Some(draw_detail(f, app, search.union(body)));
+    } else {
+        draw_search(f, app, search);
+        if body.width >= PREVIEW_MIN_WIDTH {
+            let [list, preview] =
+                Layout::horizontal([Constraint::Percentage(45), Constraint::Percentage(55)])
+                    .areas(body);
+            draw_list(f, app, list);
+            draw_preview(f, app, preview);
+        } else {
+            draw_list(f, app, body);
+        }
+    }
+    draw_footer(f, app, footer, now);
+    if app.menu.is_some() {
+        draw_menu(f, app, area);
+    }
+    drawn
+}
+
+fn draw_header(f: &mut Frame, app: &App, area: Rect, now: i64) {
+    let mut spans = vec![Span::styled(" Linear ", ACCENT)];
+    for tab in Tab::ALL {
+        spans.push(Span::raw(" "));
+        if tab == app.tab {
+            spans.push(Span::styled(format!("[{}]", tab.title()), ACCENT));
+        } else {
+            spans.push(Span::styled(tab.title(), DIM));
+        }
+    }
+    let status = status_span(app, now);
+    let used = Line::from(spans.clone()).width() + status.width() + 1;
+    spans.push(Span::raw(
+        " ".repeat(usize::from(area.width).saturating_sub(used)),
+    ));
+    spans.push(status);
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+/// 상단 오른쪽 상태: 갱신 중 / n분 전 갱신 / 오프라인 / 한도 초과.
+pub fn status_span(app: &App, now: i64) -> Span<'static> {
+    if app.loading > 0 {
+        return Span::styled("갱신 중…", DIM);
+    }
+    match &app.problem {
+        Some(Problem::Offline(_)) => Span::styled("오프라인", WARN),
+        Some(Problem::RateLimited(reset)) => {
+            let text = match reset {
+                Some(r) => format!(
+                    "한도 초과 · {}분 후 재시도",
+                    ((r - now).max(0) + 59_999) / 60_000
+                ),
+                None => "한도 초과".to_string(),
+            };
+            Span::styled(text, ERROR)
+        }
+        Some(Problem::Error(_)) => Span::styled("오류", ERROR),
+        None => match app.updated_at {
+            Some(at) => Span::styled(format!("{} 갱신", ago(now, at)), DIM),
+            None => Span::raw(""),
+        },
+    }
+}
+
+fn draw_search(f: &mut Frame, app: &App, area: Rect) {
+    let query = sanitize(&app.query);
+    let line = if app.mode == Mode::Search {
+        let mut spans = vec![Span::styled(" > ", ACCENT), Span::raw(query.clone())];
+        if query.is_empty() {
+            spans.push(Span::styled(
+                " ID·제목·본문 검색 · l:라벨 s:상태 @담당자 #팀",
+                DIM,
+            ));
+        }
+        // 한글 IME가 조합 중인 글자를 제자리에 보이도록 실제 커서를 검색어 끝에 둔다
+        let x = area.x + 3 + query.width() as u16;
+        f.set_cursor_position(Position::new(x.min(area.right().saturating_sub(1)), area.y));
+        Line::from(spans)
+    } else if query.is_empty() {
+        Line::from(Span::styled(" / 검색", DIM))
+    } else {
+        Line::from(vec![Span::styled(" / ", DIM), Span::raw(query)])
+    };
+    f.render_widget(Paragraph::new(line), area);
+}
+
+fn draw_list(f: &mut Frame, app: &App, area: Rect) {
+    if app.rows.is_empty() {
+        let text = if app.loading > 0 {
+            "불러오는 중…"
+        } else {
+            "결과가 없어요"
+        };
+        f.render_widget(Paragraph::new(Span::styled(format!("  {text}"), DIM)), area);
+        return;
+    }
+    let width = area.width.saturating_sub(2);
+    let mut items = Vec::new();
+    let mut selected_item = 0;
+    for (i, row) in app.rows.iter().enumerate() {
+        if matches!(row, Row::Pinned(_)) {
+            items.push(ListItem::new(Span::styled(" 현재 브랜치", DIM)));
+        }
+        if i > 0 && matches!(app.rows[i - 1], Row::Pinned(_)) {
+            items.push(ListItem::new(Span::styled(
+                format!(" {}", "─".repeat(usize::from(width).min(30))),
+                DIM,
+            )));
+        }
+        if i == app.selected {
+            selected_item = items.len();
+        }
+        let line = match row {
+            Row::Pinned(issue) | Row::Issue(issue) => issue_row(issue, width),
+            Row::DeepSearch => Line::from(Span::styled("⏎ 서버에서 검색 (코멘트 포함)", ACCENT)),
+        };
+        let marker = if i == app.selected { "▶ " } else { "  " };
+        let mut spans = vec![Span::styled(marker, ACCENT)];
+        spans.extend(line.spans);
+        items.push(ListItem::new(Line::from(spans)));
+    }
+    let mut state = ListState::default().with_selected(Some(selected_item));
+    f.render_stateful_widget(
+        List::new(items).highlight_style(SELECTED_BG),
+        area,
+        &mut state,
+    );
+}
+
+/// 이슈 머리: 식별자·제목 / 상태·우선순위·담당자 / 라벨·프로젝트·사이클·상위.
+pub fn issue_header(issue: &Issue, width: u16) -> Vec<Line<'static>> {
+    let mut lines = markdown::wrap_text(
+        &format!("{}  {}", issue.identifier, issue.title),
+        width,
+        Style::new().add_modifier(Modifier::BOLD),
+    );
+    if let Some(first) = lines.first_mut()
+        && let Some(span) = first.spans.first_mut()
+        && span.content.starts_with(issue.identifier.as_str())
+    {
+        // 식별자만 강조색으로
+        let rest = span.content[issue.identifier.len()..].to_string();
+        let id = Span::styled(issue.identifier.clone(), ACCENT);
+        *span = Span::styled(rest, span.style);
+        first.spans.insert(0, id);
+    }
+    let mut meta = vec![
+        Span::styled(
+            format!(
+                "{} {}",
+                state_icon(&issue.state.state_type),
+                sanitize(&issue.state.name)
+            ),
+            state_style(&issue.state),
+        ),
+        Span::styled(
+            format!(" · 우선순위 {}", priority_label(issue.priority)),
+            DIM,
+        ),
+    ];
+    match &issue.assignee {
+        Some(a) => meta.push(Span::styled(
+            format!(" · @{}", sanitize(&a.display_name)),
+            DIM,
+        )),
+        None => meta.push(Span::styled(" · 담당자 없음", DIM)),
+    }
+    lines.push(Line::from(meta));
+    let mut extra: Vec<Span<'static>> = Vec::new();
+    for label in &issue.labels.nodes {
+        if !extra.is_empty() {
+            extra.push(Span::raw(" "));
+        }
+        extra.push(Span::styled(sanitize(&label.name), label_style(label)));
+    }
+    let mut info = Vec::new();
+    if let Some(p) = &issue.project {
+        info.push(format!("프로젝트 {}", sanitize(&p.name)));
+    }
+    if let Some(c) = &issue.cycle {
+        let name = c
+            .name
+            .clone()
+            .unwrap_or_else(|| (c.number as i64).to_string());
+        info.push(format!("사이클 {}", sanitize(&name)));
+    }
+    if let Some(p) = &issue.parent {
+        info.push(format!("상위 {}", p.identifier));
+    }
+    if !info.is_empty() {
+        let sep = if extra.is_empty() { "" } else { " · " };
+        extra.push(Span::styled(format!("{sep}{}", info.join(" · ")), DIM));
+    }
+    if !extra.is_empty() {
+        lines.push(Line::from(extra));
+    }
+    lines
+}
+
+fn draw_preview(f: &mut Frame, app: &App, area: Rect) {
+    let block = Block::default().borders(Borders::LEFT).border_style(DIM);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    let Some(issue) = app.selected_issue() else {
+        return;
+    };
+    let inner = Rect {
+        x: inner.x + 1,
+        width: inner.width.saturating_sub(1),
+        ..inner
+    };
+    let mut lines = issue_header(issue, inner.width);
+    lines.push(Line::default());
+    match issue.description.as_deref().map(str::trim) {
+        Some(body) if !body.is_empty() => lines.extend(
+            markdown::render_with(body, inner.width, &Theme::default(), &app.team_keys()).lines,
+        ),
+        _ => lines.push(Line::from(Span::styled("(본문 없음)", DIM))),
+    }
+    f.render_widget(Paragraph::new(lines), inner);
+}
+
+/// 상세 화면을 그리고 최대 스크롤을 돌려준다.
+fn draw_detail(f: &mut Frame, app: &App, area: Rect) -> u16 {
+    let Some(d) = &app.detail else {
+        return 0;
+    };
+    let area = Rect {
+        x: area.x + 1,
+        width: area.width.saturating_sub(2),
+        ..area
+    };
+    let theme = Theme::default();
+    let keys = app.team_keys();
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    match &d.issue {
+        None => lines.push(Line::from(Span::styled(
+            format!("{} 불러오는 중…", sanitize(&d.id)),
+            DIM,
+        ))),
+        Some(issue) => {
+            lines.extend(issue_header(issue, area.width));
+            lines.push(Line::from(Span::styled(issue.url.clone(), DIM)));
+            if d.gone {
+                lines.push(Line::from(Span::styled(
+                    "보관되었거나 삭제된 이슈예요",
+                    WARN,
+                )));
+            }
+            lines.push(Line::default());
+            match issue.description.as_deref().map(str::trim) {
+                Some(body) if !body.is_empty() => {
+                    lines.extend(markdown::render_with(body, area.width, &theme, &keys).lines)
+                }
+                _ => lines.push(Line::from(Span::styled("(본문 없음)", DIM))),
+            }
+            if !d.comments.is_empty() {
+                lines.push(Line::default());
+                lines.push(Line::from(Span::styled(
+                    format!(
+                        "── 코멘트 {}{} ──",
+                        d.comments.len(),
+                        if d.more_comments { "+" } else { "" }
+                    ),
+                    DIM,
+                )));
+                for c in &d.comments {
+                    let who = c
+                        .user
+                        .as_ref()
+                        .map_or("알 수 없음".to_string(), |u| sanitize(&u.display_name));
+                    lines.push(Line::default());
+                    lines.push(Line::from(vec![
+                        Span::styled(who, Style::new().add_modifier(Modifier::BOLD)),
+                        Span::styled(format!(" · {}", local_time(&c.created_at)), DIM),
+                    ]));
+                    lines.extend(markdown::render_with(&c.body, area.width, &theme, &keys).lines);
+                }
+                if d.more_comments {
+                    lines.push(Line::default());
+                    lines.push(Line::from(Span::styled(
+                        "더 오래된 코멘트가 있어요. 브라우저에서 보세요 (o)",
+                        DIM,
+                    )));
+                }
+            } else if d.loading {
+                lines.push(Line::default());
+                lines.push(Line::from(Span::styled("코멘트 불러오는 중…", DIM)));
+            }
+        }
+    }
+    let total = u16::try_from(lines.len()).unwrap_or(u16::MAX);
+    let max = total.saturating_sub(area.height);
+    let scroll = d.scroll.min(max);
+    f.render_widget(Paragraph::new(lines).scroll((scroll, 0)), area);
+    max
+}
+
+fn hints(mode: Mode) -> &'static str {
+    match mode {
+        Mode::Search => " ⏎ 상세  Tab 보기  ↑↓ 이동  ^K 메뉴  Esc 목록 모드",
+        Mode::List => " j/k 이동  / 검색  ⏎ 상세  o 브라우저  y ID 복사  ^K 메뉴  q 닫기",
+        Mode::Detail => " j/k 스크롤  u 링크  o 브라우저  y ID 복사  ^K 메뉴  Esc 뒤로",
+        Mode::Onboarding => " ⏎ 확인  Esc 닫기",
+    }
+}
+
+fn draw_footer(f: &mut Frame, app: &App, area: Rect, now: i64) {
+    let span = if let Some(text) = app.flash_text(now) {
+        Span::styled(
+            format!(" {}", sanitize(text)),
+            Style::new().fg(Color::Green),
+        )
+    } else {
+        match &app.problem {
+            Some(Problem::Offline(m)) => Span::styled(
+                format!(" 오프라인이라 저장된 내용을 보여줘요 ({})", sanitize(m)),
+                WARN,
+            ),
+            Some(Problem::RateLimited(_)) => {
+                Span::styled(" 한도를 넘어서 저장된 결과만 보여줘요", ERROR)
+            }
+            Some(Problem::Error(m)) => Span::styled(format!(" 오류: {}", sanitize(m)), ERROR),
+            None => Span::styled(hints(app.mode), DIM),
+        }
+    };
+    let text = truncate(&span.content, usize::from(area.width));
+    f.render_widget(Paragraph::new(Span::styled(text, span.style)), area);
+}
+
+/// 가운데에 `w`×`h` 사각형.
+fn centered(area: Rect, w: u16, h: u16) -> Rect {
+    let w = w.min(area.width);
+    let h = h.min(area.height);
+    Rect {
+        x: area.x + (area.width - w) / 2,
+        y: area.y + (area.height - h) / 2,
+        width: w,
+        height: h,
+    }
+}
+
+fn draw_menu(f: &mut Frame, app: &App, area: Rect) {
+    let Some(menu) = &app.menu else {
+        return;
+    };
+    let items = menu.visible();
+    let w = (area.width * 6 / 10).max(30);
+    let h = u16::try_from(items.len())
+        .unwrap_or(u16::MAX)
+        .saturating_add(4);
+    let rect = centered(area, w, h);
+    f.render_widget(Clear, rect);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(ACCENT)
+        .title(format!(" {} ", menu.title));
+    let inner = block.inner(rect);
+    f.render_widget(block, rect);
+    let [filter, list] = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(inner);
+    let text = sanitize(&menu.filter);
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("> ", ACCENT),
+            Span::raw(text.clone()),
+        ])),
+        filter,
+    );
+    f.set_cursor_position(Position::new(
+        (filter.x + 2 + text.width() as u16).min(filter.right().saturating_sub(1)),
+        filter.y,
+    ));
+    let label_width = usize::from(list.width.saturating_sub(2));
+    let list_items: Vec<ListItem> = items
+        .iter()
+        .map(|(label, _)| ListItem::new(truncate(&sanitize(label), label_width)))
+        .collect();
+    let mut state = ListState::default().with_selected(Some(menu.selected));
+    f.render_stateful_widget(
+        List::new(list_items)
+            .highlight_style(SELECTED_BG)
+            .highlight_symbol("▶ "),
+        list,
+        &mut state,
+    );
+}
+
+fn draw_onboarding(f: &mut Frame, app: &App, area: Rect) {
+    let rect = centered(area, 72, 11);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(ACCENT)
+        .title(" Linear 연결 ");
+    let inner = block.inner(rect);
+    f.render_widget(block, rect);
+    let inner = Rect {
+        x: inner.x + 1,
+        width: inner.width.saturating_sub(2),
+        ..inner
+    };
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    if app.env_key_invalid {
+        lines.push(Line::from(Span::styled(
+            "LINEAR_API_KEY 환경 변수의 키가 유효하지 않아요",
+            ERROR,
+        )));
+        lines.push(Line::from("환경 변수를 고치거나 지운 뒤 다시 열어주세요."));
+        lines.push(Line::default());
+        lines.push(Line::from(Span::styled("Esc 닫기", DIM)));
+        f.render_widget(Paragraph::new(lines), inner);
+        return;
+    }
+    lines.push(Line::from("Linear Personal API 키를 붙여넣으세요."));
+    lines.push(Line::from(Span::styled(
+        "Linear → Settings → Security & access → Personal API keys",
+        DIM,
+    )));
+    lines.push(Line::default());
+    let masked = "•".repeat(app.key_input.chars().count());
+    let shown = if app.key_checking {
+        "확인 중…".to_string()
+    } else {
+        masked.clone()
+    };
+    lines.push(Line::from(vec![
+        Span::styled("키: ", ACCENT),
+        Span::raw(shown),
+    ]));
+    if let Some(err) = &app.key_error {
+        lines.push(Line::from(Span::styled(sanitize(err), ERROR)));
+    }
+    lines.push(Line::default());
+    lines.push(Line::from(Span::styled("⏎ 확인 · Esc 닫기", DIM)));
+    if !app.key_checking {
+        f.set_cursor_position(Position::new(
+            (inner.x + 4 + masked.width() as u16).min(inner.right().saturating_sub(1)),
+            inner.y + 3,
+        ));
+    }
+    f.render_widget(Paragraph::new(lines), inner);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::linear::types::Viewer;
+    use crate::test_support::IssueBuilder;
+    use crate::tui::app::{Act, Input, Msg};
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    const T0: i64 = 1_000_000;
+
+    fn viewer() -> Viewer {
+        serde_json::from_value(serde_json::json!({
+            "id": "me", "name": "김민수", "displayName": "minsu", "email": "m@acme.dev",
+            "organization": { "id": "org1", "name": "Acme", "urlKey": "acme" },
+            "teams": { "nodes": [ { "id": "team-ENG", "key": "ENG", "name": "Eng" } ] }
+        }))
+        .unwrap()
+    }
+
+    fn app() -> App {
+        let (mut app, _) = App::start(None);
+        app.apply(Msg::Viewer(viewer()), T0);
+        app.apply(
+            Msg::Tab {
+                tab: Tab::Mine,
+                issues: vec![
+                    IssueBuilder::new("a", "ENG-1", "로그인 버그")
+                        .state("In Progress", "started")
+                        .labels(&["bug"])
+                        .description("## 재현\n- 로그인 후 대기")
+                        .build(),
+                    IssueBuilder::new("b", "ENG-2", "결제 화면").build(),
+                ],
+                fresh: true,
+                has_more: false,
+                append: false,
+            },
+            T0,
+        );
+        app
+    }
+
+    /// 화면 각 줄의 글자 (넓은 글자 뒤 칸은 건너뛴다).
+    fn screen(app: &App, w: u16, h: u16) -> (Vec<String>, Drawn, Terminal<TestBackend>) {
+        let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+        let mut drawn = Drawn::default();
+        term.draw(|f| drawn = draw(f, app, T0)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let rows = (0..h)
+            .map(|y| {
+                let mut s = String::new();
+                let mut x = 0;
+                while x < w {
+                    let sym = buf[(x, y)].symbol();
+                    s.push_str(sym);
+                    x += if sym.width() == 2 { 2 } else { 1 };
+                }
+                s.trim_end().to_string()
+            })
+            .collect();
+        (rows, drawn, term)
+    }
+
+    #[test]
+    fn tiny_screens_do_not_panic() {
+        let mut detail = app();
+        detail.handle(Input::Enter, T0);
+        let mut menu = app();
+        menu.handle(Input::Menu, T0);
+        let onboarding = App::onboarding(false);
+        for app in [&app(), &detail, &menu, &onboarding] {
+            for (w, h) in [(1, 1), (5, 3), (12, 4), (20, 5), (30, 8)] {
+                screen(app, w, h);
+            }
+        }
+    }
+
+    #[test]
+    fn palette_shows_tabs_status_rows_and_preview() {
+        let (rows, _, _) = screen(&app(), 120, 16);
+        assert!(
+            rows[0].contains("[내 이슈]") && rows[0].contains("최근 본"),
+            "{}",
+            rows[0]
+        );
+        assert!(rows[0].ends_with("방금 갱신"), "{}", rows[0]);
+        assert!(
+            rows[2].contains("▶ ◐ ENG-1") && rows[2].contains("로그인 버그"),
+            "{}",
+            rows[2]
+        );
+        let all = rows.join("\n");
+        assert!(all.contains("우선순위 없음"), "미리보기 머리\n{all}");
+        assert!(all.contains("• 로그인 후 대기"), "미리보기 본문\n{all}");
+    }
+
+    #[test]
+    fn narrow_palette_hides_preview() {
+        let (rows, _, _) = screen(&app(), 80, 12);
+        assert!(!rows.join("\n").contains("우선순위"));
+    }
+
+    #[test]
+    fn search_mode_puts_cursor_after_query() {
+        let mut a = app();
+        a.handle(Input::Char('로'), T0);
+        let (rows, _, mut term) = screen(&a, 80, 12);
+        assert!(rows[1].starts_with(" > 로"), "{}", rows[1]);
+        term.backend_mut().assert_cursor_position((5, 1));
+    }
+
+    #[test]
+    fn pinned_section_has_label() {
+        let mut a = app();
+        a.apply(
+            Msg::Pinned(Some(IssueBuilder::new("b", "ENG-2", "결제 화면").build())),
+            T0,
+        );
+        let (rows, _, _) = screen(&a, 80, 12);
+        assert_eq!(rows[2], " 현재 브랜치");
+        assert!(rows[3].contains("ENG-2"), "{}", rows[3]);
+        assert!(rows[4].contains('─'));
+    }
+
+    #[test]
+    fn detail_shows_body_comments_and_max_scroll() {
+        let mut a = app();
+        a.handle(Input::Enter, T0);
+        let long = (1..=40)
+            // 줄바꿈 하나는 같은 문단이라 빈 줄로 문단을 나눈다
+            .map(|i| format!("{i}번째 문단\n\n"))
+            .collect::<String>();
+        a.apply(
+            Msg::Detail {
+                id: "a".into(),
+                issue: IssueBuilder::new("a", "ENG-1", "로그인 버그")
+                    .description(&long)
+                    .build(),
+                comments: Vec::new(),
+                more: false,
+                fresh: true,
+            },
+            T0,
+        );
+        let (rows, drawn, _) = screen(&a, 80, 12);
+        assert!(
+            rows[1].contains("ENG-1") && rows[1].contains("로그인 버그"),
+            "{rows:?}"
+        );
+        assert!(drawn.detail_max_scroll.unwrap() > 0);
+    }
+
+    #[test]
+    fn menu_overlay_lists_actions() {
+        let mut a = app();
+        a.handle(Input::Menu, T0);
+        let (rows, _, _) = screen(&a, 80, 16);
+        let all = rows.join("\n");
+        assert!(
+            all.contains("동작") && all.contains("브라우저에서 열기"),
+            "{all}"
+        );
+    }
+
+    #[test]
+    fn onboarding_masks_key() {
+        let mut a = App::onboarding(false);
+        a.handle(Input::Paste("lin_api_secret".into()), T0);
+        let (rows, _, _) = screen(&a, 80, 14);
+        let all = rows.join("\n");
+        assert!(!all.contains("secret"), "{all}");
+        assert!(all.contains("••••••••••••••"), "{all}");
+    }
+
+    #[test]
+    fn status_shows_offline_and_rate_limit() {
+        let mut a = app();
+        a.apply(
+            Msg::Failed(crate::linear::client::ApiError::Offline("x".into())),
+            T0,
+        );
+        assert_eq!(status_span(&a, T0).content, "오프라인");
+        a.apply(
+            Msg::Failed(crate::linear::client::ApiError::RateLimited {
+                reset_at_ms: Some(T0 + 120_000),
+            }),
+            T0,
+        );
+        assert_eq!(status_span(&a, T0).content, "한도 초과 · 2분 후 재시도");
+    }
+
+    #[test]
+    fn server_text_cannot_inject_terminal_codes() {
+        let mut a = app();
+        a.apply(
+            Msg::Failed(crate::linear::client::ApiError::GraphQl(
+                "나쁜\u{1b}]52;c;eA==\u{7}응답".into(),
+            )),
+            T0,
+        );
+        let (rows, _, _) = screen(&a, 100, 12);
+        assert!(
+            rows.iter()
+                .all(|r| !r.contains('\u{1b}') && !r.contains('\u{7}'))
+        );
+        assert!(rows.last().unwrap().contains("오류: 나쁜"), "{rows:?}");
+    }
+
+    #[test]
+    fn flash_replaces_hints() {
+        let mut a = app();
+        a.apply(Msg::Flash("복사됨: ENG-1".into()), T0);
+        let (rows, _, _) = screen(&a, 80, 12);
+        assert_eq!(rows[11], " 복사됨: ENG-1");
+        a.handle(Input::Act(Act::Back), T0);
+    }
+}
