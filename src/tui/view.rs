@@ -7,9 +7,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
-use super::app::{App, Detail, Mode, Problem, Row, Tab};
+use super::app::{Act, App, Detail, Mode, Problem, Row, Tab};
 use crate::linear::types::Issue;
 use crate::markdown::{self, Theme, sanitize};
+use crate::ui::relations;
 use crate::ui::row::issue_row;
 use crate::ui::style::{
     ACCENT, DIM, ago, label_style, local_time, priority_label, state_icon, state_style, truncate,
@@ -30,6 +31,8 @@ pub enum Target {
     Tab(Tab),
     /// 메뉴에 보이는 n번째 항목
     MenuItem(usize),
+    /// 상세 화면의 관계 줄 (`ui::relations::rows` 번호)
+    Relation(usize),
 }
 
 /// 화면에서 누를 수 있는 곳.
@@ -88,7 +91,8 @@ pub fn draw(f: &mut Frame, app: &App, now: i64) -> Drawn {
     let mut drawn = Drawn::default();
     drawn.hits.extend(draw_header(f, app, header, now));
     if app.mode == Mode::Detail {
-        drawn.detail_max_scroll = Some(draw_detail(f, app, search.union(body)));
+        let max = draw_detail(f, app, search.union(body), &mut drawn);
+        drawn.detail_max_scroll = Some(max);
     } else {
         draw_search(f, app, search);
         if body.width >= PREVIEW_MIN_WIDTH {
@@ -238,7 +242,8 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect, drawn: &mut Drawn) {
 }
 
 /// 이슈 머리: 식별자·제목 / 상태·우선순위·담당자 / 라벨·프로젝트·사이클·상위·예상·마감.
-pub fn issue_header(issue: &Issue, width: u16) -> Vec<Line<'static>> {
+/// 상세 화면은 관계 칸에 상위를 보여서 `show_parent`를 끈다.
+pub fn issue_header(issue: &Issue, width: u16, show_parent: bool) -> Vec<Line<'static>> {
     let ident = sanitize(&issue.identifier);
     let mut lines = markdown::wrap_text(
         &format!("{ident}  {}", issue.title),
@@ -308,7 +313,7 @@ pub fn issue_header(issue: &Issue, width: u16) -> Vec<Line<'static>> {
             .unwrap_or_else(|| (c.number as i64).to_string());
         info.push(format!("사이클 {}", sanitize(&name)));
     }
-    if let Some(p) = &issue.parent {
+    if show_parent && let Some(p) = &issue.parent {
         info.push(format!("상위 {}", sanitize(&p.identifier)));
     }
     if let Some(e) = issue.estimate {
@@ -339,7 +344,7 @@ fn draw_preview(f: &mut Frame, app: &App, area: Rect) {
         width: inner.width.saturating_sub(1),
         ..inner
     };
-    let mut lines = issue_header(issue, inner.width);
+    let mut lines = issue_header(issue, inner.width, true);
     lines.push(Line::default());
     match issue.description.as_deref().map(str::trim) {
         Some(body) if !body.is_empty() => lines.extend(
@@ -350,8 +355,8 @@ fn draw_preview(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Paragraph::new(lines), inner);
 }
 
-/// 상세 화면을 그리고 최대 스크롤을 돌려준다.
-fn draw_detail(f: &mut Frame, app: &App, area: Rect) -> u16 {
+/// 상세 화면을 그리고 최대 스크롤을 돌려준다. 보이는 관계 줄은 누를 수 있게 `drawn`에 남긴다.
+fn draw_detail(f: &mut Frame, app: &App, area: Rect, drawn: &mut Drawn) -> u16 {
     let Some(d) = &app.detail else {
         return 0;
     };
@@ -360,18 +365,36 @@ fn draw_detail(f: &mut Frame, app: &App, area: Rect) -> u16 {
         width: area.width.saturating_sub(2),
         ..area
     };
-    let lines = detail_lines(d, area.width, &app.team_keys());
+    let (lines, relation_lines) = detail_lines(d, area.width, &app.team_keys());
     let total = u16::try_from(lines.len()).unwrap_or(u16::MAX);
     let max = total.saturating_sub(area.height);
     let scroll = d.scroll.min(max);
     f.render_widget(Paragraph::new(lines).scroll((scroll, 0)), area);
+    // 줄바꿈 없이 한 줄씩 그리므로 화면 줄 = 줄 번호 - 스크롤
+    for (line, row) in relation_lines {
+        let Some(y) = u16::try_from(line).ok().and_then(|l| l.checked_sub(scroll)) else {
+            continue;
+        };
+        if y < area.height {
+            drawn.hits.push(Hit {
+                area: Rect::new(area.x, area.y + y, area.width, 1),
+                target: Target::Relation(row),
+            });
+        }
+    }
     max
 }
 
-/// 상세 화면의 줄. 링크·이미지 번호는 본문에서 코멘트로 이어 매긴다 (`u` 목록과 같은 번호).
-fn detail_lines(d: &Detail, width: u16, keys: &[String]) -> Vec<Line<'static>> {
+/// 상세 화면의 줄과, 관계 줄의 (줄 번호, `ui::relations::rows` 번호).
+/// 링크·이미지 번호는 본문에서 코멘트로 이어 매긴다 (`u` 목록과 같은 번호).
+fn detail_lines(
+    d: &Detail,
+    width: u16,
+    keys: &[String],
+) -> (Vec<Line<'static>>, Vec<(usize, usize)>) {
     let theme = Theme::default();
     let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut relation_lines = Vec::new();
     match &d.issue {
         None => {
             let id = sanitize(&d.id);
@@ -388,7 +411,7 @@ fn detail_lines(d: &Detail, width: u16, keys: &[String]) -> Vec<Line<'static>> {
             lines.push(Line::from(Span::styled(text, style)));
         }
         Some(issue) => {
-            lines.extend(issue_header(issue, width));
+            lines.extend(issue_header(issue, width, false));
             lines.push(Line::from(Span::styled(sanitize(&issue.url), DIM)));
             if d.gone {
                 lines.push(Line::from(Span::styled(
@@ -397,6 +420,17 @@ fn detail_lines(d: &Detail, width: u16, keys: &[String]) -> Vec<Line<'static>> {
                 )));
             }
             lines.push(Line::default());
+            let (rel, rows) = relations::lines(issue.parent.as_ref(), d.relations.as_ref(), width);
+            if !rel.is_empty() {
+                let start = lines.len();
+                relation_lines.extend(
+                    rows.into_iter()
+                        .enumerate()
+                        .filter_map(|(k, row)| row.map(|r| (start + k, r))),
+                );
+                lines.extend(rel);
+                lines.push(Line::default());
+            }
             let mut next_link = 1;
             match issue.description.as_deref().map(str::trim) {
                 Some(body) if !body.is_empty() => {
@@ -443,14 +477,16 @@ fn detail_lines(d: &Detail, width: u16, keys: &[String]) -> Vec<Line<'static>> {
             }
         }
     }
-    lines
+    (lines, relation_lines)
 }
 
 fn hints(mode: Mode) -> &'static str {
     match mode {
         Mode::Search => " ⏎ 상세  Tab 보기  ↑↓ 이동  ^K 메뉴  Esc 목록 모드",
         Mode::List => " j/k 이동  / 검색  ⏎ 상세  y URL 복사  Y PR 링크  ^K 메뉴  q 닫기",
-        Mode::Detail => " j/k 스크롤  u 링크  y URL 복사  Y PR 링크  ^K 메뉴  Esc 뒤로  q 닫기",
+        Mode::Detail => {
+            " j/k 스크롤  t 관계  u 링크  y URL 복사  Y PR 링크  ^K 메뉴  Esc 뒤로  q 닫기"
+        }
         Mode::Onboarding => " ⏎ 확인  Esc 닫기",
     }
 }
@@ -520,10 +556,14 @@ fn draw_menu(f: &mut Frame, app: &App, area: Rect) -> Vec<Hit> {
         (filter.x + 2 + text.width() as u16).min(filter.right().saturating_sub(1)),
         filter.y,
     ));
-    let label_width = usize::from(list.width.saturating_sub(2));
+    let label_width = list.width.saturating_sub(2);
     let list_items: Vec<ListItem> = items
         .iter()
-        .map(|(label, _)| ListItem::new(truncate(&sanitize(label), label_width)))
+        .map(|(label, act)| match act {
+            // 관계 메뉴는 상세의 관계 칸과 같은 색으로 그린다
+            Act::OpenRelated(row) => ListItem::new(relations::row_line(row, true, label_width)),
+            _ => ListItem::new(truncate(&sanitize(label), usize::from(label_width))),
+        })
         .collect();
     let mut state = ListState::default().with_selected(Some(menu.selected));
     f.render_stateful_widget(
@@ -602,9 +642,9 @@ fn draw_onboarding(f: &mut Frame, app: &App, area: Rect) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::linear::types::Viewer;
+    use crate::linear::types::{IssueRelations, RelatedIssue, Viewer};
     use crate::test_support::IssueBuilder;
-    use crate::tui::app::{Act, Input, Msg};
+    use crate::tui::app::{Input, Msg};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
@@ -670,7 +710,10 @@ mod tests {
         let mut menu = app();
         menu.handle(Input::Menu, T0);
         let onboarding = App::onboarding(false);
-        for app in [&app(), &detail, &menu, &onboarding] {
+        let related = related_detail("본문");
+        let mut related_menu = related_detail("본문");
+        related_menu.handle(Input::Act(Act::Relations), T0);
+        for app in [&app(), &detail, &menu, &onboarding, &related, &related_menu] {
             for (w, h) in [(1, 1), (5, 3), (12, 4), (20, 5), (30, 8)] {
                 screen(app, w, h);
             }
@@ -752,6 +795,7 @@ mod tests {
         );
         assert!(drawn.detail_max_scroll.unwrap() > 0);
         assert!(rows[11].ends_with("Esc 뒤로  q 닫기"), "{}", rows[11]);
+        assert!(rows[11].contains("t 관계"), "{}", rows[11]);
     }
 
     #[test]
@@ -847,7 +891,7 @@ mod tests {
         v["estimate"] = serde_json::json!(3.0);
         v["dueDate"] = serde_json::json!("2026-10-31");
         let issue: Issue = serde_json::from_value(v).unwrap();
-        let text = markdown::to_plain(&issue_header(&issue, 80));
+        let text = markdown::to_plain(&issue_header(&issue, 80, true));
         assert!(
             text.contains("예상 3") && text.contains("마감 2026-10-31"),
             "{text}"
@@ -864,7 +908,7 @@ mod tests {
                 "2026-10-05T00:00:00.000Z",
             )
             .build();
-        let text = markdown::to_plain(&issue_header(&open, 80));
+        let text = markdown::to_plain(&issue_header(&open, 80, true));
         assert!(text.contains("PR #15 열림 · web"), "{text}");
         let merged = IssueBuilder::new("b", "ENG-2", "결제")
             .pr(
@@ -874,7 +918,7 @@ mod tests {
                 "2026-10-01T00:00:00.000Z",
             )
             .build();
-        assert!(!markdown::to_plain(&issue_header(&merged, 80)).contains("PR #"));
+        assert!(!markdown::to_plain(&issue_header(&merged, 80, true)).contains("PR #"));
     }
 
     #[test]
@@ -1029,7 +1073,7 @@ mod tests {
             .description("[문서](https://x.dev/doc)")
             .build();
         let mut a = detail_of(issue, vec![comment("c1", "[로그](https://x.dev/log)")]);
-        let text = markdown::to_plain(&detail_lines(a.detail.as_ref().unwrap(), 80, &[]));
+        let text = markdown::to_plain(&detail_lines(a.detail.as_ref().unwrap(), 80, &[]).0);
         assert!(
             text.contains("문서 [1]") && text.contains("로그 [2]"),
             "{text}"
@@ -1055,7 +1099,7 @@ mod tests {
                 comment("c2", "![](https://x.dev/a.png)"),
             ],
         );
-        let text = markdown::to_plain(&detail_lines(a.detail.as_ref().unwrap(), 80, &[]));
+        let text = markdown::to_plain(&detail_lines(a.detail.as_ref().unwrap(), 80, &[]).0);
         assert!(text.contains("[이미지 1: a.png]"), "{text}");
         assert_eq!(link_menu(&mut a), vec!["[1] a.png — https://x.dev/a.png"]);
     }
@@ -1074,9 +1118,9 @@ mod tests {
                 .flat_map(|l| l.spans.iter())
                 .all(|s| !s.content.chars().any(char::is_control))
         };
-        assert!(clean(&issue_header(&issue, 80)));
+        assert!(clean(&issue_header(&issue, 80, true)));
         let a = detail_of(issue, Vec::new());
-        assert!(clean(&detail_lines(a.detail.as_ref().unwrap(), 80, &[])));
+        assert!(clean(&detail_lines(a.detail.as_ref().unwrap(), 80, &[]).0));
     }
 
     #[test]
@@ -1102,5 +1146,178 @@ mod tests {
         for (w, h) in [(1, 1), (5, 3), (12, 4), (20, 5)] {
             screen(&a, w, h);
         }
+    }
+
+    fn rel(id: &str, identifier: &str, title: &str, state_type: &str) -> RelatedIssue {
+        let i = IssueBuilder::new(id, identifier, title)
+            .state(state_type, state_type)
+            .build();
+        RelatedIssue {
+            id: i.id,
+            identifier: i.identifier,
+            title: i.title,
+            state: i.state,
+        }
+    }
+
+    /// ENG-1(상위 ENG-10): 막힘 ENG-20, 하위 ENG-30(진행)·ENG-31(완료). 본문은 `body`.
+    fn related_detail(body: &str) -> App {
+        let mut a = app();
+        a.handle(Input::Enter, T0);
+        let issue = IssueBuilder::new("a", "ENG-1", "로그인 버그")
+            .parent("p", "ENG-10", "인증 개편", "started")
+            .description(body)
+            .build();
+        let relations = IssueRelations {
+            blocked_by: vec![rel("b", "ENG-20", "API 스키마", "unstarted")],
+            children: vec![
+                rel("c1", "ENG-30", "토큰 갱신", "started"),
+                rel("c2", "ENG-31", "세션 만료", "completed"),
+            ],
+            ..IssueRelations::default()
+        };
+        a.apply(
+            Msg::Detail {
+                id: "a".into(),
+                issue,
+                comments: Vec::new(),
+                more: false,
+                relations: Some(relations),
+                fresh: true,
+            },
+            T0,
+        );
+        a
+    }
+
+    #[test]
+    fn detail_shows_relations_between_header_and_body() {
+        let a = related_detail("본문 첫 줄");
+        let (rows, _, _) = screen(&a, 80, 20);
+        let url = rows
+            .iter()
+            .position(|r| r.contains("https://linear.app/acme/issue/ENG-1"))
+            .unwrap();
+        assert_eq!(rows[url + 1], "", "URL 다음 빈 줄");
+        assert_eq!(rows[url + 2], " 상위    ◐ ENG-10    인증 개편");
+        assert_eq!(rows[url + 3], " 막힘    ○ ENG-20    API 스키마");
+        assert_eq!(rows[url + 4], " 하위    2개 중 1개 남음");
+        assert_eq!(rows[url + 5], "         ◐ ENG-30    토큰 갱신");
+        assert_eq!(rows[url + 6], "         ● ENG-31    세션 만료");
+        assert_eq!(rows[url + 7], "", "관계 칸 다음 빈 줄");
+        assert_eq!(rows[url + 8], " 본문 첫 줄");
+        assert!(
+            !rows[..url].iter().any(|r| r.contains("상위 ENG-10")),
+            "머리에서는 상위를 뺀다"
+        );
+    }
+
+    #[test]
+    fn preview_header_keeps_the_parent() {
+        let issue = IssueBuilder::new("a", "ENG-1", "로그인 버그")
+            .parent("p", "ENG-10", "인증 개편", "started")
+            .build();
+        assert!(markdown::to_plain(&issue_header(&issue, 80, true)).contains("상위 ENG-10"));
+        assert!(!markdown::to_plain(&issue_header(&issue, 80, false)).contains("상위"));
+    }
+
+    #[test]
+    fn preview_pane_shows_the_parent() {
+        let (mut a, _) = App::start(None);
+        a.apply(
+            Msg::Tab {
+                tab: Tab::Mine,
+                issues: vec![
+                    IssueBuilder::new("a", "ENG-1", "로그인 버그")
+                        .parent("p", "ENG-10", "인증 개편", "started")
+                        .build(),
+                ],
+                fresh: true,
+                has_more: false,
+                append: false,
+            },
+            T0,
+        );
+        let (rows, _, _) = screen(&a, 120, 16);
+        assert!(rows.iter().any(|r| r.contains("상위 ENG-10")), "{rows:?}");
+    }
+
+    #[test]
+    fn relation_click_targets_follow_the_scroll() {
+        let body: String = (1..=40).map(|i| format!("{i}번째 문단\n\n")).collect();
+        let mut a = related_detail(&body);
+        let (rows, drawn, _) = screen(&a, 80, 12);
+        let y = rows.iter().position(|r| r.contains("ENG-20")).unwrap() as u16;
+        assert_eq!(
+            drawn.target_at(5, y),
+            Some(Target::Relation(1)),
+            "막힘 줄은 관계 1번"
+        );
+        let summary = rows
+            .iter()
+            .position(|r| r.contains("2개 중 1개 남음"))
+            .unwrap() as u16;
+        assert_eq!(drawn.target_at(5, summary), None, "요약 줄은 누를 수 없다");
+        a.set_detail_max_scroll(drawn.detail_max_scroll.unwrap());
+        a.handle(Input::Down, T0);
+        let (rows, drawn, _) = screen(&a, 80, 12);
+        let y2 = rows.iter().position(|r| r.contains("ENG-20")).unwrap() as u16;
+        assert_eq!(y2 + 1, y, "한 줄 올라갔다");
+        assert_eq!(drawn.target_at(5, y2), Some(Target::Relation(1)));
+        for _ in 0..20 {
+            a.handle(Input::Down, T0);
+        }
+        let (rows, drawn, _) = screen(&a, 80, 12);
+        assert!(!rows.iter().any(|r| r.contains("ENG-20")));
+        assert!(
+            !drawn
+                .hits
+                .iter()
+                .any(|h| matches!(h.target, Target::Relation(_))),
+            "가려진 관계 줄은 누를 수 없다"
+        );
+    }
+
+    #[test]
+    fn relation_lines_below_the_screen_are_not_click_targets() {
+        // 상세 영역이 6줄이라 제목·메타·URL·빈 줄·상위·막힘까지만 보인다
+        let (rows, drawn, _) = screen(&related_detail("본문"), 80, 8);
+        assert!(rows.iter().any(|r| r.contains("ENG-20")), "{rows:?}");
+        assert!(!rows.iter().any(|r| r.contains("ENG-30")), "{rows:?}");
+        let clickable: Vec<usize> = drawn
+            .hits
+            .iter()
+            .filter_map(|h| match h.target {
+                Target::Relation(i) => Some(i),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            clickable,
+            vec![0, 1],
+            "화면 아래로 밀린 하위 줄은 누를 수 없다"
+        );
+    }
+
+    #[test]
+    fn relation_menu_draws_colored_rows() {
+        let mut a = related_detail("본문");
+        a.handle(Input::Act(Act::Relations), T0);
+        let (rows, drawn, term) = screen(&a, 100, 20);
+        let item = drawn
+            .hits
+            .iter()
+            .find(|h| h.target == Target::MenuItem(1))
+            .expect("막힘 항목");
+        let y = item.area.y;
+        assert!(
+            rows[usize::from(y)].contains("막힘    ○ ENG-20    API 스키마"),
+            "{rows:?}"
+        );
+        let buf = term.backend().buffer();
+        let x = (item.area.x..item.area.right())
+            .find(|&x| buf[(x, y)].symbol() == "막")
+            .expect("막힘 글자");
+        assert_eq!(buf[(x, y)].fg, Color::Red, "안 끝난 막는 이슈");
     }
 }

@@ -100,6 +100,7 @@ pub fn translate(mode: Mode, menu_open: bool, key: KeyEvent) -> Option<Input> {
         (_, 'q') => act(Act::Quit),
         (Mode::List, '/') => Some(Input::Search),
         (Mode::Detail, 'u') => act(Act::Links),
+        (Mode::Detail, 't') => act(Act::Relations),
         _ => None,
     }
 }
@@ -116,6 +117,7 @@ pub fn mouse(drawn: &Drawn, ev: MouseEvent) -> Option<Input> {
                     Target::Row(i) => Input::ClickRow(i),
                     Target::Tab(tab) => Input::ClickTab(tab),
                     Target::MenuItem(i) => Input::ClickMenu(i),
+                    Target::Relation(i) => Input::ClickRelation(i),
                 })
         }
         _ => None,
@@ -298,5 +300,47 @@ mod tests {
             translate(Mode::Search, false, key(KeyCode::Char('q'))),
             Some(Input::Char('q'))
         );
+    }
+
+    #[test]
+    fn detail_mode_has_relations_key_even_in_korean_input() {
+        for c in ['t', 'ㅅ'] {
+            assert_eq!(
+                translate(Mode::Detail, false, key(KeyCode::Char(c))),
+                Some(Input::Act(Act::Relations)),
+                "{c}"
+            );
+        }
+        assert_eq!(translate(Mode::List, false, key(KeyCode::Char('t'))), None);
+        assert_eq!(
+            translate(Mode::Search, false, key(KeyCode::Char('t'))),
+            Some(Input::Char('t'))
+        );
+        assert_eq!(
+            translate(Mode::Detail, true, key(KeyCode::Char('t'))),
+            Some(Input::Char('t')),
+            "메뉴에서는 거르기 글자"
+        );
+    }
+
+    #[test]
+    fn clicking_a_relation_line_becomes_click_relation() {
+        use crate::tui::view::{Drawn, Hit, Target};
+        use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+        use ratatui::layout::Rect;
+        let drawn = Drawn {
+            hits: vec![Hit {
+                area: Rect::new(1, 5, 60, 1),
+                target: Target::Relation(2),
+            }],
+            ..Drawn::default()
+        };
+        let ev = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 4,
+            row: 5,
+            modifiers: KeyModifiers::NONE,
+        };
+        assert_eq!(mouse(&drawn, ev), Some(Input::ClickRelation(2)));
     }
 }
