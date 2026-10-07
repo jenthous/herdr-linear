@@ -787,6 +787,7 @@ impl App {
     }
 
     /// 관계 이슈를 연다. 지금 상세는 스크롤 위치째 쌓아 둔다.
+    /// 식별자로 열어서 응답 전·실패·삭제 안내에도 사람이 읽는 이름이 보인다.
     fn open_related(&mut self, row: RelRow) -> Vec<Effect> {
         let Some(current) = self.detail.take() else {
             return Vec::new();
@@ -794,7 +795,7 @@ impl App {
         let back = current.back;
         self.detail_stack.push(current);
         self.detail = Some(Detail {
-            id: row.id.clone(),
+            id: row.identifier.clone(),
             issue: None,
             comments: Vec::new(),
             more_comments: false,
@@ -807,7 +808,7 @@ impl App {
         });
         self.mode = Mode::Detail;
         self.loading += 1;
-        vec![Effect::OpenDetail(row.id)]
+        vec![Effect::OpenDetail(row.identifier)]
     }
 
     /// 지금 상세와 쌓아 둔 상세.
@@ -2028,10 +2029,10 @@ mod tests {
         app.handle(Input::Act(Act::Relations), T0);
         type_str(&mut app, "31", T0);
         let effects = app.handle(Input::Enter, T0);
-        assert_eq!(effects, vec![Effect::OpenDetail("c2".into())]);
+        assert_eq!(effects, vec![Effect::OpenDetail("ENG-31".into())]);
         assert_eq!(app.mode, Mode::Detail);
         let d = app.detail.as_ref().unwrap();
-        assert_eq!(d.id, "c2");
+        assert_eq!(d.id, "ENG-31", "관계 이슈는 식별자로 연다");
         assert!(d.loading && d.issue.is_none());
         assert_eq!(app.loading, 1, "연 관계 이슈 요청 하나");
         app.handle(Input::Esc, T0);
@@ -2049,12 +2050,42 @@ mod tests {
         let mut app = with_relations();
         assert_eq!(
             app.handle(Input::ClickRelation(1), T0),
-            vec![Effect::OpenDetail("b".into())]
+            vec![Effect::OpenDetail("ENG-20".into())]
         );
-        assert_eq!(app.detail.as_ref().unwrap().id, "b");
+        assert_eq!(app.detail.as_ref().unwrap().id, "ENG-20");
         assert!(
             app.handle(Input::ClickRelation(99), T0).is_empty(),
             "없는 줄"
+        );
+    }
+
+    #[test]
+    fn responses_land_on_a_relation_opened_by_identifier() {
+        let mut app = with_relations();
+        // 하위 ENG-31(id c2). 요청도 상세도 식별자로 연다
+        assert_eq!(
+            app.handle(Input::ClickRelation(3), T0),
+            vec![Effect::OpenDetail("ENG-31".into())]
+        );
+        let sent = || issue("c2", "ENG-31", "세션 만료");
+        // 캐시가 먼저 오고, 서버 응답이 뒤따른다
+        app.apply(detail_msg("ENG-31", sent(), None, false), T0);
+        let d = app.detail.as_ref().unwrap();
+        assert_eq!(d.issue.as_ref().unwrap().identifier, "ENG-31");
+        assert!(d.loading, "서버 응답을 아직 기다린다");
+        app.apply(
+            detail_msg("ENG-31", sent(), Some(IssueRelations::default()), true),
+            T0,
+        );
+        let d = app.detail.as_ref().unwrap();
+        assert!(!d.loading && !d.gone);
+        assert_eq!(app.loading, 0, "요청 하나가 끝났다");
+        app.handle(Input::Esc, T0);
+        let back = app.detail.as_ref().unwrap();
+        assert_eq!(
+            back.issue.as_ref().unwrap().identifier,
+            "ENG-1",
+            "쌓은 상세"
         );
     }
 
@@ -2069,11 +2100,15 @@ mod tests {
             T0,
         );
         app.handle(Input::ClickRelation(0), T0);
-        assert_eq!(app.detail.as_ref().unwrap().id, "p");
+        assert_eq!(app.detail.as_ref().unwrap().id, "ENG-10");
         let mut fresh = issue;
         fresh.title = "새 제목".into();
         app.apply(detail_msg("a", fresh, Some(relations), true), T0);
-        assert_eq!(app.detail.as_ref().unwrap().id, "p", "지금 상세는 그대로");
+        assert_eq!(
+            app.detail.as_ref().unwrap().id,
+            "ENG-10",
+            "지금 상세는 그대로"
+        );
         app.handle(Input::Esc, T0);
         let d = app.detail.as_ref().unwrap();
         assert_eq!(d.issue.as_ref().unwrap().title, "새 제목");
@@ -2185,7 +2220,7 @@ mod tests {
         assert_eq!(menu_labels(&app), vec!["상위 ENG-10 인증 개편"]);
         assert_eq!(
             app.handle(Input::Enter, T0),
-            vec![Effect::OpenDetail("p".into())],
+            vec![Effect::OpenDetail("ENG-10".into())],
             "알려진 상위는 관계를 몰라도 열 수 있다"
         );
     }

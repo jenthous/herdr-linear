@@ -1160,6 +1160,9 @@ mod tests {
         }
     }
 
+    /// 막힘 ENG-20의 Linear id. 실제 id는 UUID라서 화면에 나오면 알아볼 수 있다.
+    const BLOCKER_ID: &str = "0b9c5f2e-6d1a-4c3b-8e47-92a1d5f60c38";
+
     /// ENG-1(상위 ENG-10): 막힘 ENG-20, 하위 ENG-30(진행)·ENG-31(완료). 본문은 `body`.
     fn related_detail(body: &str) -> App {
         let mut a = app();
@@ -1169,7 +1172,7 @@ mod tests {
             .description(body)
             .build();
         let relations = IssueRelations {
-            blocked_by: vec![rel("b", "ENG-20", "API 스키마", "unstarted")],
+            blocked_by: vec![rel(BLOCKER_ID, "ENG-20", "API 스키마", "unstarted")],
             children: vec![
                 rel("c1", "ENG-30", "토큰 갱신", "started"),
                 rel("c2", "ENG-31", "세션 만료", "completed"),
@@ -1296,6 +1299,49 @@ mod tests {
             clickable,
             vec![0, 1],
             "화면 아래로 밀린 하위 줄은 누를 수 없다"
+        );
+    }
+
+    #[test]
+    fn opened_relation_shows_its_identifier_not_the_linear_id() {
+        let shown = |a: &App| screen(a, 80, 12).0.join("\n");
+        let mut a = related_detail("본문");
+        a.handle(Input::ClickRelation(1), T0); // 막힘 ENG-20. 아직 응답이 없다
+        let text = shown(&a);
+        assert!(text.contains("ENG-20 불러오는 중…"), "{text}");
+        assert!(!text.contains(BLOCKER_ID), "{text}");
+        a.apply(
+            Msg::Failed(crate::linear::client::ApiError::Offline("x".into())),
+            T0,
+        );
+        let text = shown(&a);
+        assert!(text.contains("ENG-20: 불러오지 못했어요"), "{text}");
+        assert!(!text.contains(BLOCKER_ID), "{text}");
+        // 없는 이슈면 식별자로 온 응답이 그 상세에 닿는다
+        let mut gone = related_detail("본문");
+        gone.handle(Input::ClickRelation(1), T0);
+        gone.apply(Msg::DetailGone("ENG-20".into()), T0);
+        let text = shown(&gone);
+        assert!(text.contains("ENG-20: 찾을 수 없거나"), "{text}");
+        assert!(!text.contains(BLOCKER_ID), "{text}");
+    }
+
+    #[test]
+    fn opened_relation_placeholder_strips_control_characters() {
+        let mut a = related_detail("본문");
+        // 관계 줄의 식별자가 상세의 id가 되어 안내 문구에 그대로 나온다
+        let relations = a.detail.as_mut().and_then(|d| d.relations.as_mut());
+        relations.unwrap().blocked_by[0].identifier = "ENG-20\u{1b}]52;c;eA==\u{7}".into();
+        a.handle(Input::ClickRelation(1), T0);
+        // 화면 버퍼는 제어 문자를 스스로 걸러서, 그리기 전의 줄을 본다
+        let (lines, _) = detail_lines(a.detail.as_ref().unwrap(), 80, &[]);
+        assert!(markdown::to_plain(&lines).contains("ENG-20"));
+        assert!(
+            lines
+                .iter()
+                .flat_map(|l| l.spans.iter())
+                .all(|s| !s.content.chars().any(char::is_control)),
+            "{lines:?}"
         );
     }
 
