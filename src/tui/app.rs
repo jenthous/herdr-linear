@@ -4,10 +4,11 @@
 //! [`Msg`]로 [`App::apply`]에 넘긴다. 앱은 해야 할 일을 [`Effect`]로 돌려준다.
 
 use crate::linear::client::ApiError;
-use crate::linear::types::{Comment, Issue, Viewer};
+use crate::linear::types::{Comment, Issue, IssueRelations, Viewer};
 use crate::markdown::{self, Theme};
 use crate::search::query::parse;
 use crate::search::rank::{SearchIndex, merge};
+use crate::ui::relations::{self, RelRow};
 
 /// 서버 검색을 보내기 전에 입력이 멈춰야 하는 시간.
 pub const SEARCH_DEBOUNCE_MS: i64 = 300;
@@ -81,6 +82,10 @@ pub enum Act {
     Back,
     Quit,
     OpenUrl(String),
+    /// 상세의 관계 메뉴
+    Relations,
+    /// 관계 이슈를 연다. 지금 상세는 쌓아 두고 Esc로 돌아온다
+    OpenRelated(RelRow),
 }
 
 /// 키 입력을 해석한 결과 (`tui::keys`가 만든다).
@@ -112,6 +117,8 @@ pub enum Input {
     ClickTab(Tab),
     /// 마우스로 메뉴에 보이는 n번째 항목을 눌렀다
     ClickMenu(usize),
+    /// 상세 화면의 관계 줄(`ui::relations::rows` 번호)을 눌렀다
+    ClickRelation(usize),
 }
 
 /// 앱이 런타임에 요청하는 일.
@@ -166,6 +173,8 @@ pub enum Msg {
         issue: Issue,
         comments: Vec<Comment>,
         more: bool,
+        /// 관계. 캐시에 없으면 `None`
+        relations: Option<IssueRelations>,
         fresh: bool,
     },
     /// 보관·삭제됐거나 없는 이슈. `OpenDetail`에 넘긴 값(id 또는 식별자)이 그대로 온다
@@ -227,6 +236,8 @@ pub struct Detail {
     pub issue: Option<Issue>,
     pub comments: Vec<Comment>,
     pub more_comments: bool,
+    /// 관계. 아직 모르면 `None`
+    pub relations: Option<IssueRelations>,
     pub scroll: u16,
     pub max_scroll: u16,
     pub loading: bool,
@@ -271,6 +282,8 @@ pub struct App {
     /// 목록의 스크롤 위치. 런타임이 그린 결과(`Drawn::list_offset`)를 넣어 준다
     pub list_offset: usize,
     pub detail: Option<Detail>,
+    /// 관계 이슈를 열 때 쌓아 둔 상세. Esc로 하나씩 돌아간다
+    detail_stack: Vec<Detail>,
     pub menu: Option<Menu>,
     pub key_input: String,
     pub key_error: Option<String>,
@@ -307,6 +320,7 @@ impl App {
             selected: 0,
             list_offset: 0,
             detail: None,
+            detail_stack: Vec::new(),
             menu: None,
             key_input: String::new(),
             key_error: None,
@@ -339,6 +353,7 @@ impl App {
                 issue: None,
                 comments: Vec::new(),
                 more_comments: false,
+                relations: None,
                 scroll: 0,
                 max_scroll: 0,
                 loading: true,
@@ -611,6 +626,11 @@ impl App {
             Input::Esc => return self.act(Act::Back, now),
             Input::Act(a) => return self.act(a, now),
             Input::Menu => self.open_menu(),
+            Input::ClickRelation(i) => {
+                if let Some(row) = self.detail_rows().get(i).cloned() {
+                    return self.act(Act::OpenRelated(row), now);
+                }
+            }
             _ => {}
         }
         Vec::new()
@@ -677,6 +697,7 @@ impl App {
         }
         if self.mode == Mode::Detail {
             items.push(("링크·이미지 목록".into(), Act::Links));
+            items.push(("관계 이슈".into(), Act::Relations));
         }
         if self.mode != Mode::Detail && parse(&self.query).has_text() {
             items.push(("서버에서 깊은 검색 (코멘트 포함)".into(), Act::DeepSearch));
@@ -731,6 +752,69 @@ impl App {
         });
     }
 
+    /// 지금 상세의 관계 줄. 화면의 관계 칸과 같은 순서라 메뉴·클릭 번호가 화면과 맞는다.
+    fn detail_rows(&self) -> Vec<RelRow> {
+        self.detail.as_ref().map_or_else(Vec::new, |d| {
+            relations::rows(
+                d.issue.as_ref().and_then(|i| i.parent.as_ref()),
+                d.relations.as_ref(),
+            )
+        })
+    }
+
+    /// 관계 메뉴. 제목으로 관계를 아직 모르는지, 받지 못했는지, 없는지 알린다.
+    fn open_relations(&mut self) {
+        let Some(d) = self.detail.as_ref() else {
+            return;
+        };
+        let (known, loading) = (d.relations.is_some(), d.loading);
+        let rows = self.detail_rows();
+        let title = match (known, loading) {
+            (false, true) => "관계 불러오는 중…",
+            (false, false) => "관계를 불러오지 못했어요",
+            (true, _) if rows.is_empty() => "관계 없음",
+            (true, _) => "관계",
+        };
+        self.menu = Some(Menu {
+            title,
+            items: rows
+                .into_iter()
+                .map(|r| (r.filter_text(), Act::OpenRelated(r)))
+                .collect(),
+            filter: String::new(),
+            selected: 0,
+        });
+    }
+
+    /// 관계 이슈를 연다. 지금 상세는 스크롤 위치째 쌓아 둔다.
+    fn open_related(&mut self, row: RelRow) -> Vec<Effect> {
+        let Some(current) = self.detail.take() else {
+            return Vec::new();
+        };
+        let back = current.back;
+        self.detail_stack.push(current);
+        self.detail = Some(Detail {
+            id: row.id.clone(),
+            issue: None,
+            comments: Vec::new(),
+            more_comments: false,
+            relations: None,
+            scroll: 0,
+            max_scroll: 0,
+            loading: true,
+            gone: false,
+            back,
+        });
+        self.mode = Mode::Detail;
+        self.loading += 1;
+        vec![Effect::OpenDetail(row.id)]
+    }
+
+    /// 지금 상세와 쌓아 둔 상세.
+    fn details_mut(&mut self) -> impl Iterator<Item = &mut Detail> {
+        self.detail.iter_mut().chain(self.detail_stack.iter_mut())
+    }
+
     fn switch_tab(&mut self, tab: Tab, now: i64) -> Vec<Effect> {
         self.tab = tab;
         if !self.query.is_empty() {
@@ -779,6 +863,7 @@ impl App {
                         issue: Some(issue.clone()),
                         comments: Vec::new(),
                         more_comments: false,
+                        relations: None,
                         scroll: 0,
                         max_scroll: 0,
                         loading: true,
@@ -862,7 +947,18 @@ impl App {
                 self.open_links();
                 Vec::new()
             }
+            Act::Relations => {
+                self.open_relations();
+                Vec::new()
+            }
+            Act::OpenRelated(row) => self.open_related(row),
             Act::Back => {
+                // 관계 이슈에서 왔으면 앞 상세로 돌아간다 (스크롤 위치째)
+                if let Some(prev) = self.detail_stack.pop() {
+                    self.detail = Some(prev);
+                    self.mode = Mode::Detail;
+                    return Vec::new();
+                }
                 let back = self.detail.take().map_or(Mode::List, |d| d.back);
                 self.mode = back;
                 Vec::new()
@@ -950,6 +1046,7 @@ impl App {
                 issue,
                 comments,
                 more,
+                relations,
                 fresh,
             } => {
                 if fresh {
@@ -957,28 +1054,33 @@ impl App {
                     self.succeeded(now);
                     self.index.upsert(std::slice::from_ref(&issue));
                 }
-                if let Some(d) = self.detail.as_mut()
-                    && (d.id == id
+                // 쌓아 둔 상세도 같은 이슈면 바꾼다 (응답 전에 관계 이슈로 넘어간 경우)
+                for d in self.details_mut() {
+                    if d.id == id
                         || d.id == issue.id
-                        || d.id.eq_ignore_ascii_case(&issue.identifier))
-                {
-                    d.id = issue.id.clone();
-                    d.issue = Some(issue);
-                    d.comments = comments;
-                    d.more_comments = more;
-                    if fresh {
-                        d.loading = false;
+                        || d.id.eq_ignore_ascii_case(&issue.identifier)
+                    {
+                        d.id = issue.id.clone();
+                        d.issue = Some(issue.clone());
+                        d.comments = comments.clone();
+                        d.more_comments = more;
+                        if let Some(r) = &relations {
+                            d.relations = Some(r.clone());
+                        }
+                        if fresh {
+                            d.loading = false;
+                        }
                     }
                 }
             }
             Msg::DetailGone(id) => {
                 self.done_loading();
                 let same = |i: &Issue| i.id == id || i.identifier.eq_ignore_ascii_case(&id);
-                if let Some(d) = self.detail.as_mut()
-                    && (d.id.eq_ignore_ascii_case(&id) || d.issue.as_ref().is_some_and(same))
-                {
-                    d.gone = true;
-                    d.loading = false;
+                for d in self.details_mut() {
+                    if d.id.eq_ignore_ascii_case(&id) || d.issue.as_ref().is_some_and(same) {
+                        d.gone = true;
+                        d.loading = false;
+                    }
                 }
                 for data in &mut self.tabs {
                     data.issues.retain(|i| !same(i));
@@ -1015,6 +1117,7 @@ impl App {
                 self.mode = Mode::Onboarding;
                 self.menu = None;
                 self.detail = None;
+                self.detail_stack.clear();
                 self.loading = 0;
                 self.env_key_invalid = env;
                 self.key_checking = false;
@@ -1024,7 +1127,8 @@ impl App {
             }
             Msg::Failed(e) => {
                 self.done_loading();
-                if let Some(d) = self.detail.as_mut() {
+                // 어느 요청의 실패인지 모르니 쌓아 둔 상세의 대기도 푼다
+                for d in self.details_mut() {
                     d.loading = false;
                 }
                 self.tabs[Tab::All.index()].loading_more = false;
@@ -1084,6 +1188,7 @@ fn minutes_left(until: i64, now: i64) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::linear::types::RelatedIssue;
     use crate::test_support::IssueBuilder;
 
     const T0: i64 = 1_000_000;
@@ -1275,6 +1380,7 @@ mod tests {
                 issue: issue("a", "ENG-1", "로그인 버그"),
                 comments: Vec::new(),
                 more: false,
+                relations: None,
                 fresh: true,
             },
             T0,
@@ -1294,6 +1400,7 @@ mod tests {
                 issue: issue("a", "ENG-1", "로그인 버그"),
                 comments: Vec::new(),
                 more: false,
+                relations: None,
                 fresh: true,
             },
             T0,
@@ -1313,6 +1420,7 @@ mod tests {
                 issue: issue("b", "ENG-2", "결제 화면"),
                 comments: vec![],
                 more: false,
+                relations: None,
                 fresh: true,
             },
             T0,
@@ -1385,6 +1493,7 @@ mod tests {
                 issue: issue("x7", "ENG-7", "옛 이슈"),
                 comments: vec![],
                 more: false,
+                relations: None,
                 fresh: false,
             },
             T0,
@@ -1662,6 +1771,7 @@ mod tests {
                 issue: with_links,
                 comments: Vec::new(),
                 more: false,
+                relations: None,
                 fresh: true,
             },
             T0,
@@ -1833,5 +1943,203 @@ mod tests {
             Some("설정 경고: A · 경고: B")
         );
         assert_eq!(app.warning_text(T0 + 1_000 + WARN_MS), None);
+    }
+
+    fn rel(id: &str, identifier: &str, title: &str, state_type: &str) -> RelatedIssue {
+        let i = IssueBuilder::new(id, identifier, title)
+            .state(state_type, state_type)
+            .build();
+        RelatedIssue {
+            id: i.id,
+            identifier: i.identifier,
+            title: i.title,
+            state: i.state,
+        }
+    }
+
+    /// ENG-1(상위 ENG-10): 막힘 ENG-20, 하위 ENG-30·ENG-31.
+    fn related() -> (Issue, IssueRelations) {
+        let issue = IssueBuilder::new("a", "ENG-1", "로그인 버그")
+            .parent("p", "ENG-10", "인증 개편", "started")
+            .build();
+        let relations = IssueRelations {
+            blocked_by: vec![rel("b", "ENG-20", "API 스키마", "unstarted")],
+            children: vec![
+                rel("c1", "ENG-30", "토큰 갱신", "started"),
+                rel("c2", "ENG-31", "세션 만료", "completed"),
+            ],
+            ..IssueRelations::default()
+        };
+        (issue, relations)
+    }
+
+    fn detail_msg(id: &str, issue: Issue, relations: Option<IssueRelations>, fresh: bool) -> Msg {
+        Msg::Detail {
+            id: id.into(),
+            issue,
+            comments: Vec::new(),
+            more: false,
+            relations,
+            fresh,
+        }
+    }
+
+    /// 첫 이슈의 상세를 열고 관계까지 받은 앱.
+    fn with_relations() -> App {
+        let mut app = started();
+        app.handle(Input::Enter, T0);
+        let (issue, relations) = related();
+        app.apply(detail_msg("a", issue, Some(relations), true), T0);
+        app
+    }
+
+    fn menu_labels(app: &App) -> Vec<String> {
+        app.menu
+            .as_ref()
+            .unwrap()
+            .visible()
+            .iter()
+            .map(|(l, _)| l.clone())
+            .collect()
+    }
+
+    #[test]
+    fn relations_menu_lists_rows_in_screen_order() {
+        let mut app = with_relations();
+        app.handle(Input::Act(Act::Relations), T0);
+        assert_eq!(app.menu.as_ref().unwrap().title, "관계");
+        assert_eq!(
+            menu_labels(&app),
+            vec![
+                "상위 ENG-10 인증 개편",
+                "막힘 ENG-20 API 스키마",
+                "하위 ENG-30 토큰 갱신",
+                "하위 ENG-31 세션 만료",
+            ]
+        );
+    }
+
+    #[test]
+    fn opening_a_relation_stacks_the_detail_and_esc_comes_back() {
+        let mut app = with_relations();
+        app.set_detail_max_scroll(10);
+        app.handle(Input::Down, T0);
+        app.handle(Input::Down, T0);
+        app.handle(Input::Act(Act::Relations), T0);
+        type_str(&mut app, "31", T0);
+        let effects = app.handle(Input::Enter, T0);
+        assert_eq!(effects, vec![Effect::OpenDetail("c2".into())]);
+        assert_eq!(app.mode, Mode::Detail);
+        let d = app.detail.as_ref().unwrap();
+        assert_eq!(d.id, "c2");
+        assert!(d.loading && d.issue.is_none());
+        assert_eq!(app.loading, 1, "연 관계 이슈 요청 하나");
+        app.handle(Input::Esc, T0);
+        let d = app.detail.as_ref().unwrap();
+        assert_eq!(d.issue.as_ref().unwrap().identifier, "ENG-1", "원래 이슈로");
+        assert_eq!(d.scroll, 2, "스크롤 위치 그대로");
+        assert_eq!(app.mode, Mode::Detail);
+        app.handle(Input::Esc, T0);
+        assert_eq!(app.mode, Mode::Search, "처음 이슈에서 Esc는 목록으로");
+        assert!(app.detail.is_none());
+    }
+
+    #[test]
+    fn clicking_a_relation_line_opens_that_issue() {
+        let mut app = with_relations();
+        assert_eq!(
+            app.handle(Input::ClickRelation(1), T0),
+            vec![Effect::OpenDetail("b".into())]
+        );
+        assert_eq!(app.detail.as_ref().unwrap().id, "b");
+        assert!(
+            app.handle(Input::ClickRelation(99), T0).is_empty(),
+            "없는 줄"
+        );
+    }
+
+    #[test]
+    fn response_for_a_stacked_detail_still_lands() {
+        let mut app = started();
+        app.handle(Input::Enter, T0);
+        let (issue, relations) = related();
+        // 캐시가 먼저 오고 서버 응답은 아직이다
+        app.apply(
+            detail_msg("a", issue.clone(), Some(relations.clone()), false),
+            T0,
+        );
+        app.handle(Input::ClickRelation(0), T0);
+        assert_eq!(app.detail.as_ref().unwrap().id, "p");
+        let mut fresh = issue;
+        fresh.title = "새 제목".into();
+        app.apply(detail_msg("a", fresh, Some(relations), true), T0);
+        assert_eq!(app.detail.as_ref().unwrap().id, "p", "지금 상세는 그대로");
+        app.handle(Input::Esc, T0);
+        let d = app.detail.as_ref().unwrap();
+        assert_eq!(d.issue.as_ref().unwrap().title, "새 제목");
+        assert!(!d.loading, "돌아와도 불러오는 중에 멈춰 있지 않다");
+        assert_eq!(app.loading, 1, "상위 이슈 요청만 남았다");
+    }
+
+    #[test]
+    fn failure_clears_waiting_on_stacked_details_too() {
+        let mut app = started();
+        app.handle(Input::Enter, T0);
+        let (issue, relations) = related();
+        app.apply(detail_msg("a", issue, Some(relations), false), T0);
+        app.handle(Input::ClickRelation(0), T0);
+        app.apply(Msg::Failed(ApiError::Offline("x".into())), T0);
+        app.handle(Input::Esc, T0);
+        assert!(!app.detail.as_ref().unwrap().loading);
+    }
+
+    #[test]
+    fn relations_menu_title_says_what_we_know() {
+        let title = |app: &mut App| {
+            app.handle(Input::Act(Act::Relations), T0);
+            let t = app.menu.as_ref().unwrap().title;
+            app.handle(Input::Esc, T0);
+            t
+        };
+        let mut app = started();
+        app.handle(Input::Enter, T0);
+        assert_eq!(title(&mut app), "관계 불러오는 중…");
+        app.apply(Msg::Failed(ApiError::Offline("x".into())), T0);
+        assert_eq!(title(&mut app), "관계를 불러오지 못했어요");
+        app.apply(
+            detail_msg(
+                "a",
+                issue("a", "ENG-1", "로그인 버그"),
+                Some(IssueRelations::default()),
+                true,
+            ),
+            T0,
+        );
+        assert_eq!(title(&mut app), "관계 없음");
+        assert!(app.menu.is_none());
+    }
+
+    #[test]
+    fn detail_menu_has_relations_after_links() {
+        let mut app = with_relations();
+        app.handle(Input::Menu, T0);
+        let labels = menu_labels(&app);
+        let links = labels.iter().position(|l| l == "링크·이미지 목록").unwrap();
+        assert_eq!(labels[links + 1], "관계 이슈");
+        app.handle(Input::Esc, T0);
+        app.handle(Input::Esc, T0);
+        app.handle(Input::Menu, T0);
+        assert!(
+            !menu_labels(&app).contains(&"관계 이슈".to_string()),
+            "목록에서는 없다"
+        );
+    }
+
+    #[test]
+    fn auth_failure_drops_the_detail_stack() {
+        let mut app = with_relations();
+        app.handle(Input::ClickRelation(0), T0);
+        app.apply(Msg::AuthFailed { env: false }, T0);
+        assert!(app.detail.is_none() && app.detail_stack.is_empty());
     }
 }

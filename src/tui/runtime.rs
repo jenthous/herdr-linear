@@ -314,6 +314,7 @@ impl Runtime {
                     issue: d.issue,
                     comments: d.comments,
                     more: d.more_comments,
+                    relations: d.relations,
                     fresh: true,
                 }]
             }
@@ -550,6 +551,7 @@ impl Runtime {
                 issue,
                 comments,
                 more: false,
+                relations: None,
                 fresh: false,
             });
         }
@@ -1075,6 +1077,7 @@ mod tests {
                 comments,
                 more,
                 fresh,
+                ..
             } => {
                 assert_eq!(id, "ENG-1");
                 assert_eq!(issue.title, "새 제목");
