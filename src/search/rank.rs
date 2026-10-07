@@ -3,7 +3,7 @@
 use std::cmp::Ordering;
 use std::collections::HashSet;
 
-use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
+use nucleo_matcher::pattern::{Atom, AtomKind, CaseMatching, Normalization};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 use unicode_normalization::UnicodeNormalization;
 
@@ -83,6 +83,16 @@ impl SearchIndex {
     pub fn search(&self, q: &ParsedQuery, viewer_id: Option<&str>) -> Vec<Issue> {
         rank(&self.entries, &HashSet::new(), q, viewer_id)
     }
+
+    /// 새로 받은 이슈를 색인에 넣거나 바꾼다. 보관·휴지통 이슈는 뺀다.
+    pub fn upsert(&mut self, issues: &[Issue]) {
+        for issue in issues {
+            self.entries.retain(|e| e.issue.id != issue.id);
+            if !issue.is_gone() {
+                self.entries.push(Entry::new(issue.clone()));
+            }
+        }
+    }
 }
 
 /// 로컬 결과와 서버 결과를 합친다. 같은 id면 서버 쪽(최신)을 쓴다.
@@ -106,7 +116,7 @@ pub fn merge(
 
 #[derive(Debug, Clone, Copy)]
 struct Rank {
-    /// 0 식별자·번호 일치, 1 제목 퍼지, 2 본문 포함, 3 텍스트 조건 없음
+    /// 0 식별자·번호 일치, 1 모든 단어가 제목에, 2 단어마다 제목 또는 본문에, 3 텍스트 조건 없음
     tier: u8,
     score: u32,
 }
@@ -118,8 +128,21 @@ fn rank(
     viewer_id: Option<&str>,
 ) -> Vec<Issue> {
     let terms = text_terms(q);
-    let pattern = (!terms.is_empty())
-        .then(|| Pattern::parse(&terms.join(" "), CaseMatching::Ignore, Normalization::Smart));
+    // `!`, `^`, `$`, `'` 같은 퍼지 문법을 해석하지 않도록 단어마다 리터럴 atom을 만든다
+    let atoms: Vec<Atom> = terms
+        .iter()
+        .map(|t| {
+            Atom::new(
+                t,
+                CaseMatching::Ignore,
+                Normalization::Smart,
+                AtomKind::Fuzzy,
+                false,
+            )
+        })
+        .collect();
+    // text_terms는 자유 텍스트 단어를 맨 앞에 둔다
+    let word_count = q.words.len();
     let mut matcher = Matcher::new(Config::DEFAULT);
     let mut buf = Vec::new();
     let mut scored: Vec<(Rank, &Issue)> = Vec::new();
@@ -128,16 +151,20 @@ fn rank(
         if !kept && !passes_filters(&e.issue, q, viewer_id) {
             continue;
         }
-        let rank = if !q.has_text() {
-            Rank { tier: 3, score: 0 }
-        } else if exact_match(&e.issue, q) {
+        if !q.has_text() {
+            scored.push((Rank { tier: 3, score: 0 }, &e.issue));
+            continue;
+        }
+        let hay = Utf32Str::new(&e.hay, &mut buf);
+        let title: Vec<Option<u16>> = atoms.iter().map(|a| a.score(hay, &mut matcher)).collect();
+        // 단어마다 제목(퍼지) 또는 본문(포함) 어느 한쪽에 있으면 된다
+        let found = |i: usize| title[i].is_some() || e.desc.contains(terms[i].as_str());
+        let rank = if exact_match(&e.issue, q) && (0..word_count).all(found) {
             Rank { tier: 0, score: 0 }
-        } else if let Some(score) = pattern
-            .as_ref()
-            .and_then(|p| p.score(Utf32Str::new(&e.hay, &mut buf), &mut matcher))
-        {
+        } else if title.iter().all(Option::is_some) {
+            let score = title.iter().map(|s| u32::from(s.unwrap_or(0))).sum();
             Rank { tier: 1, score }
-        } else if terms.iter().all(|t| e.desc.contains(t.as_str())) || kept {
+        } else if (0..terms.len()).all(found) || kept {
             Rank { tier: 2, score: 0 }
         } else {
             continue;
@@ -368,5 +395,53 @@ mod tests {
         let elapsed = start.elapsed();
         assert_eq!(r.len(), 5000);
         assert!(elapsed.as_millis() < 16, "{elapsed:?}");
+    }
+
+    #[test]
+    fn fuzzy_syntax_characters_are_literal() {
+        let idx = SearchIndex::new(vec![
+            IssueBuilder::new("a", "ENG-1", "로그인 오류").build(),
+            IssueBuilder::new("b", "ENG-2", "결제 실패").build(),
+        ]);
+        // `!`가 부정으로 해석되면 "결제 실패"가 나온다
+        assert!(idx.search(&parse("!로그인"), None).is_empty());
+    }
+
+    #[test]
+    fn words_may_split_between_title_and_body() {
+        let idx = SearchIndex::new(vec![
+            IssueBuilder::new("a", "ENG-1", "로그인 버그")
+                .description("결제 흐름에서 발생")
+                .build(),
+            IssueBuilder::new("b", "ENG-2", "로그인 화면").build(),
+        ]);
+        assert_eq!(ids(&idx.search(&parse("로그인 결제"), None)), vec!["ENG-1"]);
+    }
+
+    #[test]
+    fn number_match_still_needs_the_other_words() {
+        let idx = SearchIndex::new(vec![
+            IssueBuilder::new("a", "OPS-131", "결제 페이지").build(),
+            IssueBuilder::new("b", "ENG-5", "로그인 버그 131").build(),
+        ]);
+        assert_eq!(ids(&idx.search(&parse("로그인 131"), None)), vec!["ENG-5"]);
+        assert_eq!(ids(&idx.search(&parse("131"), None))[0], "OPS-131");
+    }
+
+    #[test]
+    fn upsert_replaces_and_drops_gone_issues() {
+        let mut idx = SearchIndex::new(vec![
+            IssueBuilder::new("a", "ENG-1", "옛 제목").build(),
+            IssueBuilder::new("b", "ENG-2", "보관될 이슈").build(),
+        ]);
+        idx.upsert(&[
+            IssueBuilder::new("a", "ENG-1", "새 제목").build(),
+            IssueBuilder::new("b", "ENG-2", "보관될 이슈")
+                .archived()
+                .build(),
+            IssueBuilder::new("c", "ENG-3", "새 이슈").build(),
+        ]);
+        assert_eq!(idx.len(), 2);
+        assert_eq!(ids(&idx.search(&parse("새"), None)), vec!["ENG-1", "ENG-3"]);
     }
 }
