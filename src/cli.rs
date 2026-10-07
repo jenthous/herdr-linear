@@ -12,12 +12,13 @@ use crate::herdr::{Herdr, open_palette};
 use crate::linear::client::{ApiError, LinearClient};
 use crate::linear::filter::{build_issue_filter, token_filter};
 use crate::linear::queries;
-use crate::linear::types::{Comment, Issue, TeamRef, Viewer};
+use crate::linear::types::{Comment, Issue, IssueRelations, TeamRef, Viewer};
 use crate::log::Logger;
 use crate::markdown::{self, Theme};
 use crate::search::query::parse;
 use crate::search::rank::{SearchIndex, merge, sort_mine};
 use crate::store::{Store, remove_db_files};
+use crate::ui::relations;
 use crate::ui::row::issue_row;
 use crate::ui::style::local_time;
 pub use crate::ui::style::{ago, priority_label, state_icon};
@@ -483,12 +484,16 @@ pub fn show(ctx: &Ctx, id: &str) -> Result<String> {
             }
             ctx.store
                 .set_comments(&d.issue.id, &d.comments, ctx.now_ms)?;
+            if let Some(r) = &d.relations {
+                ctx.store.set_relations(&d.issue.id, r, ctx.now_ms)?;
+            }
             ctx.store.mark_viewed(&d.issue.id, ctx.now_ms)?;
             Ok(format_detail(
                 ctx,
                 &d.issue,
                 &d.comments,
                 d.more_comments,
+                d.relations.as_ref(),
                 None,
                 &keys,
             ))
@@ -512,11 +517,13 @@ pub fn show(ctx: &Ctx, id: &str) -> Result<String> {
                 .get_comments(&issue.id)?
                 .map(|(c, _)| c)
                 .unwrap_or_default();
+            let relations = ctx.store.get_relations(&issue.id)?.map(|(r, _)| r);
             Ok(format_detail(
                 ctx,
                 &issue,
                 &comments,
                 false,
+                relations.as_ref(),
                 Some(&format!("오프라인: 저장된 내용 · {msg}")),
                 &keys,
             ))
@@ -590,6 +597,7 @@ fn format_detail(
     issue: &Issue,
     comments: &[Comment],
     more: bool,
+    relations: Option<&IssueRelations>,
     banner: Option<&str>,
     team_keys: &[String],
 ) -> String {
@@ -630,9 +638,6 @@ fn format_detail(
                 .unwrap_or_else(|| (c.number as i64).to_string())
         ));
     }
-    if let Some(p) = &issue.parent {
-        extra.push(format!("상위 {}", p.identifier));
-    }
     if let Some(e) = issue.estimate {
         extra.push(format!("예상 {e}"));
     }
@@ -645,6 +650,16 @@ fn format_detail(
     out.push(issue.url.clone());
     // 여기까지는 Linear 값이 그대로 들어간 평문이라 제어 문자를 지운다
     let mut out: Vec<String> = out.iter().map(|l| markdown::sanitize(l)).collect();
+    // 관계 칸은 TUI 상세와 같은 줄을 쓴다 (제어 문자는 줄을 만들 때 지운다)
+    let (rel, _) = relations::lines(issue.parent.as_ref(), relations, ctx.width);
+    if !rel.is_empty() {
+        out.push(String::new());
+        out.push(if ctx.color {
+            markdown::to_ansi(&rel)
+        } else {
+            markdown::to_plain(&rel)
+        });
+    }
     out.push(String::new());
     let body = issue.description.as_deref().unwrap_or("").trim();
     if body.is_empty() {
@@ -699,6 +714,7 @@ fn render_md(ctx: &Ctx, md: &str, theme: &Theme, team_keys: &[String]) -> String
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::linear::types::RelatedIssue;
     use crate::test_support::IssueBuilder;
     use mockito::Matcher;
     use serde_json::{Value, json};
@@ -1322,5 +1338,81 @@ mod tests {
         let mut buf = Vec::new();
         write_out(&mut buf, "ENG-1").unwrap();
         assert_eq!(buf, b"ENG-1\n");
+    }
+
+    fn rel_json(id: &str, identifier: &str, title: &str, state_type: &str) -> Value {
+        IssueBuilder::new(id, identifier, title)
+            .state(state_type, state_type)
+            .json()
+    }
+
+    #[test]
+    fn show_lists_relations_after_the_url_and_saves_them() {
+        let mut server = mockito::Server::new();
+        let mut issue = IssueBuilder::new("i1", "ENG-1", "로그인 버그")
+            .parent("p", "ENG-10", "인증 개편", "started")
+            .description("본문")
+            .json();
+        issue["comments"] =
+            json!({ "nodes": [], "pageInfo": { "hasNextPage": false, "endCursor": null } });
+        issue["children"] = json!({
+            "nodes": [ rel_json("c1", "ENG-30", "토큰 갱신", "completed") ],
+            "pageInfo": { "hasNextPage": false }
+        });
+        issue["inverseRelations"] = json!({ "nodes": [
+            { "type": "blocks", "issue": rel_json("b1", "ENG-20", "API 스키마", "unstarted") }
+        ] });
+        server
+            .mock("POST", "/graphql")
+            .match_body(Matcher::Regex("query Detail".into()))
+            .with_body(json!({ "data": { "issue": issue } }).to_string())
+            .create();
+        let (_d, mut ctx) = test_ctx(url(&server));
+        let out = show(&ctx, "ENG-1").unwrap();
+        assert!(
+            out.contains(
+                "https://linear.app/acme/issue/ENG-1\n\n\
+                 상위    ◐ ENG-10    인증 개편\n\
+                 막힘    ○ ENG-20    API 스키마\n\
+                 하위    1개 모두 끝남\n        \
+                 ● ENG-30    토큰 갱신\n\n본문"
+            ),
+            "{out}"
+        );
+        assert!(!out.contains("상위 ENG-10"), "머리 줄에서는 뺀다\n{out}");
+        assert!(!out.contains('\u{1b}'), "색을 끄면 이스케이프가 없다");
+        assert!(ctx.store.get_relations("i1").unwrap().is_some());
+        ctx.color = true;
+        let colored = show(&ctx, "ENG-1").unwrap();
+        assert!(
+            colored.contains("m막힘"),
+            "색을 켜면 칸 이름에 색\n{colored:?}"
+        );
+    }
+
+    #[test]
+    fn show_offline_uses_cached_relations() {
+        let (_d, ctx) = test_ctx(OFFLINE.into());
+        trust_cache(&ctx);
+        ctx.store
+            .upsert_issues(
+                &[IssueBuilder::new("i1", "ENG-1", "저장된 상세").build()],
+                NOW,
+            )
+            .unwrap();
+        let blocker = IssueBuilder::new("b1", "ENG-20", "API 스키마").build();
+        let relations = IssueRelations {
+            blocked_by: vec![RelatedIssue {
+                id: blocker.id,
+                identifier: blocker.identifier,
+                title: blocker.title,
+                state: blocker.state,
+            }],
+            ..IssueRelations::default()
+        };
+        ctx.store.set_relations("i1", &relations, NOW).unwrap();
+        let out = show(&ctx, "ENG-1").unwrap();
+        assert!(out.starts_with("(오프라인: 저장된 내용"), "{out}");
+        assert!(out.contains("막힘    ○ ENG-20    API 스키마"), "{out}");
     }
 }
