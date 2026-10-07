@@ -70,6 +70,15 @@ impl IssueBuilder {
         self
     }
 
+    /// 상위 이슈 (`state_type` 상태와 함께).
+    pub fn parent(mut self, id: &str, identifier: &str, title: &str, state_type: &str) -> Self {
+        self.0["parent"] = json!({
+            "id": id, "identifier": identifier, "title": title,
+            "state": { "id": format!("st-{state_type}"), "name": state_type, "type": state_type, "color": "#5e6ad2" }
+        });
+        self
+    }
+
     pub fn archived(mut self) -> Self {
         self.0["archivedAt"] = json!("2026-10-02T00:00:00.000Z");
         self

@@ -170,6 +170,16 @@ pub struct StateRef {
     pub color: String,
 }
 
+impl StateRef {
+    /// 끝난 상태(완료·취소·중복)인지.
+    pub fn is_finished(&self) -> bool {
+        matches!(
+            self.state_type.as_str(),
+            "completed" | "canceled" | "duplicate"
+        )
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserRef {
@@ -196,6 +206,9 @@ pub struct ParentRef {
     pub id: String,
     pub identifier: String,
     pub title: String,
+    /// 상위 이슈의 상태. 예전 캐시에는 없다
+    #[serde(default)]
+    pub state: Option<StateRef>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -248,13 +261,48 @@ pub struct IssuePage {
     pub page_info: PageInfo,
 }
 
-/// 상세 화면용: 이슈 + 코멘트(오래된 것부터).
+/// 관계로 이어진 이슈. 상세 화면의 관계 칸에 쓰는 필드만 받는다.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RelatedIssue {
+    pub id: String,
+    pub identifier: String,
+    pub title: String,
+    pub state: StateRef,
+}
+
+/// 상세 화면의 관계: 하위, 막힘, 막는 중, 관련. 상위는 `Issue::parent`에 있다.
+/// 캐시에 JSON으로 저장한다. 빠진 칸은 빈 값으로 읽는다.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct IssueRelations {
+    /// Linear 하위 목록 순서
+    pub children: Vec<RelatedIssue>,
+    /// 하위가 더 있는지 (한 번에 받는 개수를 넘음)
+    pub more_children: bool,
+    /// 이 이슈를 막는 이슈
+    pub blocked_by: Vec<RelatedIssue>,
+    /// 이 이슈가 막는 이슈
+    pub blocking: Vec<RelatedIssue>,
+    pub related: Vec<RelatedIssue>,
+}
+
+impl IssueRelations {
+    pub fn is_empty(&self) -> bool {
+        self.children.is_empty()
+            && self.blocked_by.is_empty()
+            && self.blocking.is_empty()
+            && self.related.is_empty()
+    }
+}
+
+/// 상세 화면용: 이슈 + 코멘트(오래된 것부터) + 관계.
 #[derive(Debug, Clone, PartialEq)]
 pub struct IssueDetail {
     pub issue: Issue,
     pub comments: Vec<Comment>,
     /// 코멘트가 50개를 넘는지.
     pub more_comments: bool,
+    pub relations: IssueRelations,
 }
 
 #[cfg(test)]
@@ -358,5 +406,35 @@ mod tests {
         let mut v = IssueBuilder::new("i1", "ENG-1", "a").json();
         v["trashed"] = serde_json::json!(true);
         assert!(serde_json::from_value::<Issue>(v).unwrap().is_gone());
+    }
+
+    #[test]
+    fn old_parent_without_state_still_reads() {
+        let mut v = IssueBuilder::new("a", "ENG-2", "하위").json();
+        v["parent"] = serde_json::json!({ "id": "p", "identifier": "ENG-1", "title": "상위" });
+        let issue: Issue = serde_json::from_value(v).unwrap();
+        assert_eq!(issue.parent.unwrap().state, None, "예전 캐시");
+        let with_state = IssueBuilder::new("a", "ENG-2", "하위")
+            .parent("p", "ENG-1", "상위", "started")
+            .build();
+        let back: Issue =
+            serde_json::from_str(&serde_json::to_string(&with_state).unwrap()).unwrap();
+        assert_eq!(back.parent.unwrap().state.unwrap().state_type, "started");
+    }
+
+    #[test]
+    fn finished_states_are_completed_canceled_and_duplicate() {
+        let state = |t: &str| StateRef {
+            id: "s".into(),
+            name: "s".into(),
+            state_type: t.into(),
+            color: "#000000".into(),
+        };
+        for t in ["completed", "canceled", "duplicate"] {
+            assert!(state(t).is_finished(), "{t}");
+        }
+        for t in ["triage", "backlog", "unstarted", "started"] {
+            assert!(!state(t).is_finished(), "{t}");
+        }
     }
 }

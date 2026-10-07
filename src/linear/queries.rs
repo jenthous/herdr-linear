@@ -4,14 +4,21 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::client::{ApiError, LinearClient};
-use super::types::{Comment, Issue, IssueDetail, IssuePage, Nodes, PageInfo, Viewer};
+use super::types::{
+    Comment, Issue, IssueDetail, IssuePage, IssueRelations, Nodes, PageInfo, RelatedIssue, Viewer,
+};
 
 pub const PAGE_SIZE: i64 = 50;
 pub const DEEP_SEARCH_SIZE: i64 = 20;
 pub const COMMENT_PAGE_SIZE: i64 = 50;
+/// 상세에서 하위·관계를 종류마다 몇 개까지 받는지.
+pub const RELATION_PAGE_SIZE: i64 = 50;
+
+/// 관계로 이어진 이슈에서 받는 필드 (`RelatedIssue`).
+const RELATED_SELECTION: &str = "id identifier title state { id name type color }";
 
 /// 이슈 하나에 대해 가져오는 필드. `Issue`와 `IssueSearchResult`에 똑같이 쓴다.
-const ISSUE_SELECTION: &str = "id identifier number title description priority estimate url branchName dueDate createdAt updatedAt archivedAt trashed team { id key name } state { id name type color } assignee { id name displayName } project { id name } cycle { id number name } parent { id identifier title } labels(first: 20) { nodes { id name color } } attachments(first: 10) { nodes { url sourceType createdAt metadata } }";
+const ISSUE_SELECTION: &str = "id identifier number title description priority estimate url branchName dueDate createdAt updatedAt archivedAt trashed team { id key name } state { id name type color } assignee { id name displayName } project { id name } cycle { id number name } parent { id identifier title state { id name type color } } labels(first: 20) { nodes { id name color } } attachments(first: 10) { nodes { url sourceType createdAt metadata } }";
 
 pub fn issue_fragment() -> String {
     format!("fragment IssueFields on Issue {{ {ISSUE_SELECTION} }}")
@@ -95,17 +102,25 @@ pub fn deep_search(
     Ok(c.execute::<D>(&q, vars)?.search.nodes)
 }
 
-/// 이슈와 코멘트. 이슈가 없으면 `None`.
+/// 이슈, 코멘트, 하위·관계. 이슈가 없으면 `None`.
 pub fn issue_detail(c: &LinearClient, id: &str) -> Result<Option<IssueDetail>, ApiError> {
     #[derive(Deserialize)]
     struct D {
         issue: DetailIssue,
     }
     #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
     struct DetailIssue {
         #[serde(flatten)]
         issue: Issue,
         comments: CommentPage,
+        /// 관계 필드는 예전 응답 모양에서도 읽히도록 없어도 된다
+        #[serde(default)]
+        children: Option<ChildPage>,
+        #[serde(default)]
+        relations: Option<Nodes<Value>>,
+        #[serde(default)]
+        inverse_relations: Option<Nodes<Value>>,
     }
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -113,22 +128,124 @@ pub fn issue_detail(c: &LinearClient, id: &str) -> Result<Option<IssueDetail>, A
         nodes: Vec<Comment>,
         page_info: PageInfo,
     }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ChildPage {
+        nodes: Vec<Value>,
+        page_info: PageInfo,
+    }
     let q = format!(
-        "query Detail($id: String!, $first: Int) {{ issue(id: $id) {{ ...IssueFields comments(first: $first) {{ nodes {{ id body createdAt editedAt user {{ id name displayName }} }} pageInfo {{ hasNextPage endCursor }} }} }} }} {}",
+        "query Detail($id: String!, $first: Int) {{ issue(id: $id) {{ ...IssueFields \
+         comments(first: $first) {{ nodes {{ id body createdAt editedAt user {{ id name displayName }} }} pageInfo {{ hasNextPage endCursor }} }} \
+         children(first: {RELATION_PAGE_SIZE}) {{ nodes {{ {RELATED_SELECTION} subIssueSortOrder }} pageInfo {{ hasNextPage }} }} \
+         relations(first: {RELATION_PAGE_SIZE}) {{ nodes {{ type relatedIssue {{ {RELATED_SELECTION} }} }} }} \
+         inverseRelations(first: {RELATION_PAGE_SIZE}) {{ nodes {{ type issue {{ {RELATED_SELECTION} }} }} }} }} }} {}",
         issue_fragment()
     );
     match c.execute::<D>(&q, json!({ "id": id, "first": COMMENT_PAGE_SIZE })) {
         Ok(d) => {
             let mut comments = d.issue.comments.nodes;
             comments.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+            let (children, more_children) = d.issue.children.map_or((Vec::new(), false), |p| {
+                (p.nodes, p.page_info.has_next_page)
+            });
+            let relations = relations_from(
+                children,
+                more_children,
+                d.issue.relations.map(|n| n.nodes).unwrap_or_default(),
+                d.issue
+                    .inverse_relations
+                    .map(|n| n.nodes)
+                    .unwrap_or_default(),
+            );
             Ok(Some(IssueDetail {
                 issue: d.issue.issue,
                 comments,
                 more_comments: d.issue.comments.page_info.has_next_page,
+                relations,
             }))
         }
         Err(ApiError::GraphQl(msg)) if is_not_found(&msg) => Ok(None),
         Err(e) => Err(e),
+    }
+}
+
+/// 하위 노드 하나.
+#[derive(Deserialize)]
+struct ChildNode {
+    #[serde(flatten)]
+    issue: RelatedIssue,
+    #[serde(default, rename = "subIssueSortOrder")]
+    sort_order: Option<f64>,
+}
+
+/// 관계 노드 하나. `relations`는 `relatedIssue`가, `inverseRelations`는 `issue`가 상대 이슈다.
+#[derive(Deserialize)]
+struct RelationNode {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
+    issue: Option<RelatedIssue>,
+    #[serde(default, rename = "relatedIssue")]
+    related_issue: Option<RelatedIssue>,
+}
+
+/// 상세 응답의 하위·관계 노드를 화면에 쓰는 모양으로 바꾼다.
+/// `blocks`는 방향으로 나누고(`relations` = 이 이슈가 막는 이슈, `inverseRelations` = 이 이슈를 막는 이슈),
+/// `related`는 양쪽을 합친다. 그 밖의 종류와 읽을 수 없는 노드는 버린다.
+fn relations_from(
+    children: Vec<Value>,
+    more_children: bool,
+    relations: Vec<Value>,
+    inverse: Vec<Value>,
+) -> IssueRelations {
+    let mut kids: Vec<ChildNode> = children
+        .into_iter()
+        .filter_map(|v| serde_json::from_value(v).ok())
+        .collect();
+    // Linear 하위 목록 순서. 값이 없으면 뒤로 보내고, 같으면 받은 순서를 지킨다
+    kids.sort_by(|a, b| match (a.sort_order, b.sort_order) {
+        (Some(x), Some(y)) => x.total_cmp(&y),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
+    });
+    let nodes = |list: Vec<Value>| -> Vec<RelationNode> {
+        list.into_iter()
+            .filter_map(|v| serde_json::from_value(v).ok())
+            .collect()
+    };
+    let mut out = IssueRelations {
+        children: kids.into_iter().map(|k| k.issue).collect(),
+        more_children,
+        ..IssueRelations::default()
+    };
+    for n in nodes(relations) {
+        let Some(other) = n.related_issue else {
+            continue;
+        };
+        match n.kind.as_str() {
+            "blocks" => push_unique(&mut out.blocking, other),
+            "related" => push_unique(&mut out.related, other),
+            _ => {}
+        }
+    }
+    for n in nodes(inverse) {
+        let Some(other) = n.issue else {
+            continue;
+        };
+        match n.kind.as_str() {
+            "blocks" => push_unique(&mut out.blocked_by, other),
+            "related" => push_unique(&mut out.related, other),
+            _ => {}
+        }
+    }
+    out
+}
+
+fn push_unique(list: &mut Vec<RelatedIssue>, issue: RelatedIssue) {
+    if !list.iter().any(|i| i.id == issue.id) {
+        list.push(issue);
     }
 }
 
@@ -300,6 +417,11 @@ mod tests {
             vec!["c1", "c2"]
         );
         assert!(d.more_comments);
+        assert_eq!(
+            d.relations,
+            IssueRelations::default(),
+            "관계 필드가 없는 응답은 빈 관계"
+        );
     }
 
     #[test]
@@ -339,6 +461,93 @@ mod tests {
             )
             .create();
         team_issues(&client(&server), &[], None).unwrap();
+        m.assert();
+    }
+
+    fn rel_issue(id: &str, identifier: &str, state_type: &str) -> Value {
+        json!({
+            "id": id, "identifier": identifier, "title": format!("{identifier} 제목"),
+            "state": { "id": format!("st-{state_type}"), "name": state_type, "type": state_type, "color": "#5e6ad2" }
+        })
+    }
+
+    #[test]
+    fn detail_reads_relations_by_direction() {
+        let mut server = mockito::Server::new();
+        let mut issue = IssueBuilder::new("i1", "ENG-1", "상세").json();
+        issue["comments"] =
+            json!({ "nodes": [], "pageInfo": { "hasNextPage": false, "endCursor": null } });
+        let mut first = rel_issue("c1", "ENG-11", "completed");
+        first["subIssueSortOrder"] = json!(1.0);
+        let mut second = rel_issue("c2", "ENG-12", "started");
+        second["subIssueSortOrder"] = json!(2.0);
+        let mut unordered = rel_issue("c3", "ENG-13", "unstarted");
+        unordered["subIssueSortOrder"] = Value::Null;
+        issue["children"] = json!({
+            "nodes": [unordered, second, first],
+            "pageInfo": { "hasNextPage": true }
+        });
+        issue["relations"] = json!({ "nodes": [
+            { "type": "blocks", "relatedIssue": rel_issue("b1", "ENG-21", "unstarted") },
+            { "type": "related", "relatedIssue": rel_issue("r1", "ENG-31", "started") },
+            { "type": "duplicate", "relatedIssue": rel_issue("d1", "ENG-41", "canceled") },
+            { "type": "similar", "relatedIssue": rel_issue("s1", "ENG-51", "backlog") },
+            { "type": "blocks", "relatedIssue": null },
+            { "type": "blocks", "relatedIssue": { "id": "x" } }
+        ] });
+        issue["inverseRelations"] = json!({ "nodes": [
+            { "type": "blocks", "issue": rel_issue("k1", "ENG-61", "started") },
+            { "type": "related", "issue": rel_issue("r1", "ENG-31", "started") },
+            { "type": "related", "issue": rel_issue("r2", "ENG-32", "completed") }
+        ] });
+        server
+            .mock("POST", "/graphql")
+            .with_body(json!({ "data": { "issue": issue } }).to_string())
+            .create();
+        let d = issue_detail(&client(&server), "ENG-1").unwrap().unwrap();
+        let ids = |list: &[RelatedIssue]| {
+            list.iter()
+                .map(|i| i.identifier.clone())
+                .collect::<Vec<_>>()
+        };
+        let r = &d.relations;
+        assert_eq!(
+            ids(&r.children),
+            vec!["ENG-11", "ENG-12", "ENG-13"],
+            "Linear 하위 순서, 값이 없으면 뒤로"
+        );
+        assert!(r.more_children);
+        assert_eq!(
+            ids(&r.blocking),
+            vec!["ENG-21"],
+            "이 이슈가 막는 이슈. 읽을 수 없는 노드는 버린다"
+        );
+        assert_eq!(ids(&r.blocked_by), vec!["ENG-61"], "이 이슈를 막는 이슈");
+        assert_eq!(
+            ids(&r.related),
+            vec!["ENG-31", "ENG-32"],
+            "양쪽 related를 합치고 겹치는 것은 하나만"
+        );
+    }
+
+    #[test]
+    fn detail_query_asks_for_relations_and_parent_state() {
+        let mut server = mockito::Server::new();
+        let mut issue = IssueBuilder::new("i1", "ENG-1", "상세").json();
+        issue["comments"] =
+            json!({ "nodes": [], "pageInfo": { "hasNextPage": false, "endCursor": null } });
+        let m = server
+            .mock("POST", "/graphql")
+            .match_body(Matcher::AllOf(vec![
+                Matcher::Regex(r"parent \{ id identifier title state \{ id name type color \} \}".into()),
+                Matcher::Regex(format!(r"children\(first: {RELATION_PAGE_SIZE}\) \{{ nodes \{{ id identifier title state")),
+                Matcher::Regex("subIssueSortOrder".into()),
+                Matcher::Regex(format!(r" relations\(first: {RELATION_PAGE_SIZE}\) \{{ nodes \{{ type relatedIssue")),
+                Matcher::Regex(format!(r"inverseRelations\(first: {RELATION_PAGE_SIZE}\) \{{ nodes \{{ type issue")),
+            ]))
+            .with_body(json!({ "data": { "issue": issue } }).to_string())
+            .create();
+        issue_detail(&client(&server), "ENG-1").unwrap();
         m.assert();
     }
 }
