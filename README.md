@@ -2,7 +2,7 @@
 
 **Fast Linear issue lookup inside [herdr](https://herdr.dev).** A popup palette that searches as you type, renders issue bodies and comments as markdown in the terminal, and copies issue and PR links.
 
-[한국어](#한국어) · MIT
+[한국어](#한국어) · [Roadmap](ROADMAP.md) · MIT
 
 > The interface text is in Korean for now.
 
@@ -130,6 +130,8 @@ scripts/deploy-local.sh   # build and link a stable copy for daily use on this m
 ---
 
 # 한국어
+
+[로드맵](ROADMAP.md#로드맵)
 
 [herdr](https://herdr.dev) 안에서 Linear 이슈를 빠르게 찾고 읽는 플러그인이에요. 단축키로 팝업 팔레트를 띄워 입력하는 대로 찾고, 본문(markdown)과 코멘트를 터미널에서 바로 봐요. 이슈와 PR 링크도 복사해요.
 

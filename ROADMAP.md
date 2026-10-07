@@ -1,0 +1,97 @@
+# Roadmap
+
+[한국어](#로드맵)
+
+## ✅ v0.1 — quick lookup (released 2026-10-07)
+
+- Popup palette with three tabs (my issues, recently viewed, all), drawn in Linear's own colors
+- Search as you type: cache first, then the server. Deep search also covers comments.
+- Issue detail with the markdown body, comments, links, and the open PR
+- Copy the issue URL or the open PR link, open in a browser, and use the mouse
+- herdr integration:
+  - a shortcut action
+  - Ctrl+click on Linear links
+  - the issue for the current git branch
+  - opening an issue by its selected ID
+- Works offline from the cache. A small CLI ships too (`mine`, `search`, `show`).
+- Published on GitHub and listed in the herdr plugin marketplace
+
+## 🔜 v0.2 — side panel and actions (next)
+
+- **Side panel**: one key (`prefix+shift+i`) opens or closes a Linear pane to the right of your work. It starts in list mode and refreshes on its own, every 60 seconds by default.
+- **Change issues without leaving the terminal**: status, labels, assignee, comments, and new issues. Changes show up immediately. If Linear rejects one, it is rolled back and the reason is shown.
+- **Send an issue to an agent** (`p`):
+  - A template is filled with the issue's title, link, state, labels, description, and recent comments.
+  - You can edit it before sending.
+  - It is pasted into the agent's pane.
+- **Polish from the v0.1 review**: key-change handling, link numbers in comments, redraw cost, and other small fixes
+
+## Later
+
+- Prebuilt binaries with checksums on GitHub Releases, so installing doesn't need Rust. Building from source stays as the fallback.
+- Report agent results back to Linear as comments and status changes
+- Create a git worktree from an issue
+- Korean initial-consonant (초성) search
+- More edits: priority, project, cycle
+- Syntax highlighting in code blocks
+
+## Under consideration
+
+- An English interface (the UI text is Korean for now)
+- Signing in with Linear OAuth instead of a personal API key
+
+## Not planned
+
+- Syncing the whole workspace or running a background daemon (only what you look at is cached)
+- Using several Linear workspaces at the same time
+- Deleting issues, or editing and deleting comments
+- Showing images inline
+
+---
+
+# 로드맵
+
+## ✅ v0.1 — 빠른 조회 (2026-10-07 공개)
+
+- 팝업 팔레트: 내 이슈 · 최근 본 · 전체 탭을 Linear 색으로 보여 줘요.
+- 입력하는 대로 검색해요. 캐시에서 먼저 찾고 서버에서도 찾아요. 깊은 검색은 코멘트까지 찾아요.
+- 상세 화면: markdown 본문, 코멘트, 링크, 열린 PR을 보여 줘요.
+- 티켓 URL·열린 PR 링크를 복사하고, 브라우저로 열고, 마우스로 조작해요.
+- herdr 연결
+  - 단축키 액션
+  - Linear 링크 Ctrl+클릭
+  - 현재 브랜치의 이슈 고정
+  - 선택한 식별자로 바로 열기
+- 캐시로 오프라인에서도 봐요. CLI도 함께 있어요(`mine`, `search`, `show`).
+- GitHub에 공개하고 herdr 플러그인 마켓플레이스에 올렸어요.
+
+## 🔜 v0.2 — 사이드 패널과 변경 동작 (다음)
+
+- **사이드 패널**: 키 하나(`prefix+shift+i`)로 작업 오른쪽에 Linear pane을 열고 닫아요. 목록 모드로 시작하고 스스로 새로고침해요(기본 60초마다).
+- **터미널에서 바로 바꾸기**: 상태, 라벨, 담당자, 코멘트, 새 이슈. 바꾼 내용은 바로 보여요. Linear가 거절하면 되돌리고 이유를 보여 줘요.
+- **이슈를 에이전트에게 보내기** (`p`)
+  - 이슈의 제목·링크·상태·라벨·본문·최근 코멘트로 템플릿을 채워요.
+  - 보내기 전에 고칠 수 있어요.
+  - 에이전트 pane에 붙여 넣어요.
+- **v0.1 리뷰에서 미룬 손질**: 키를 바꿀 때 상태 정리, 코멘트 링크 번호, 다시 그리는 비용 등 작은 수정
+
+## 나중에
+
+- GitHub Releases에 미리 빌드한 바이너리와 체크섬을 올려서, Rust 없이도 설치되게 해요. 소스 빌드는 대체 수단으로 남겨요.
+- 에이전트 작업 결과를 Linear 코멘트·상태에 반영해요.
+- 이슈에서 git worktree를 만들어요.
+- 초성 검색
+- 더 많은 변경: 우선순위, 프로젝트, 사이클
+- 코드 블록 문법 강조
+
+## 검토 중
+
+- 영어 화면 (지금은 화면 문구가 한국어예요)
+- 개인 API 키 대신 Linear OAuth로 로그인
+
+## 하지 않을 것
+
+- 워크스페이스 전체 동기화나 백그라운드 데몬 (본 것만 캐시해요)
+- 여러 Linear 워크스페이스를 동시에 쓰기
+- 이슈 삭제, 코멘트 수정·삭제
+- 이미지를 화면 안에 그대로 보여 주기
