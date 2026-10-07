@@ -173,7 +173,7 @@ pub enum Msg {
         issue: Issue,
         comments: Vec<Comment>,
         more: bool,
-        /// 관계. 캐시에 없으면 `None`
+        /// 관계. 캐시에 없거나 관계 없이 다시 받았으면 `None`이고, 이때는 이미 아는 관계를 그대로 둔다
         relations: Option<IssueRelations>,
         fresh: bool,
     },
@@ -1065,6 +1065,7 @@ impl App {
                         d.issue = Some(issue.clone());
                         d.comments = comments.clone();
                         d.more_comments = more;
+                        // None이면(모름) 이미 아는 관계를 지우지 않는다
                         if let Some(r) = &relations {
                             d.relations = Some(r.clone());
                         }

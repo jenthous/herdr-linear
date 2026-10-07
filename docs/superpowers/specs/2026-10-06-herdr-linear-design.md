@@ -272,7 +272,7 @@ Linear  [내 이슈]  최근 본  전체
 
 - **Ctrl+K 액션 메뉴**는 모든 모드에서 동작한다. 현재 선택한 이슈에 할 수 있는 모든 동작을 퍼지로 골라 실행한다. Ctrl 조합은 IME를 거치지 않으므로 한글 입력 중에도 항상 쓸 수 있다.
 - **두벌식 자모 매핑**: 목록·상세 모드에서 한 글자 키가 한글 자모로 들어오면 같은 영문 키로 처리한다.
-  - ㄴ→s, ㅣ→l, ㅁ→a, ㅊ→c, ㅔ→p, ㅜ→n, ㅐ→o, ㅛ→y, ㅓ→j, ㅏ→k, ㅎ→g, ㄱ→r, ㅕ→u, ㅂ→q
+  - ㄴ→s, ㅣ→l, ㅁ→a, ㅊ→c, ㅔ→p, ㅜ→n, ㅐ→o, ㅛ→y, ㅓ→j, ㅏ→k, ㅎ→g, ㄱ→r, ㅕ→u, ㅂ→q, ㅅ→t
   - IME로는 대문자를 구분할 수 없어서 `Y`와 `G`는 영문 입력에서만 동작한다.
 
 ## 5. markdown 렌더링
@@ -376,13 +376,13 @@ CREATE TABLE relations (
 |---|---|---|
 | 보기 탭 목록 | `view_results` | 탭을 열 때. 사이드 패널은 `side.refresh_seconds`마다. `r`을 누를 때 |
 | 검색 결과 | 캐시된 이슈 | 입력이 300ms 멈출 때 |
-| 이슈 상세·코멘트 | `issues`, `comments` | 상세 화면을 열 때, `r`을 누를 때 |
+| 이슈 상세·코멘트·관계 | `issues`, `comments`, `relations` | 상세 화면을 열 때, `r`을 누를 때 |
 | 팀 참조(상태·라벨·멤버)와 워크스페이스 라벨 | `team_refs`, `workspace_labels` | 변경 메뉴를 열 때 60분이 지났으면 |
 | viewer와 팀 목록 | `meta` | 앱을 시작할 때 60분이 지났으면 |
 
 - 변경 API 응답으로 받은 이슈와 코멘트는 바로 캐시에 덮어쓴다.
 - 다시 불러온 이슈가 보관(`archivedAt`)이나 휴지통(`trashed`) 상태이거나 찾을 수 없으면, 캐시에서 지우고 "보관되었거나 삭제된 이슈"라고 표시한다.
-- 앱을 시작할 때 `max(fetched_at, viewed_at)`이 `cache.retention_days`(기본 30일)보다 오래된 이슈와 그 코멘트를 지운다. `view_results`에 남은 없는 id는 읽을 때 건너뛴다.
+- 앱을 시작할 때 `max(fetched_at, viewed_at)`이 `cache.retention_days`(기본 30일)보다 오래된 이슈와 그 코멘트·관계를 지운다. `view_results`에 남은 없는 id는 읽을 때 건너뛴다.
 - 키의 워크스페이스(`organization.id`)가 저장된 `org_id`와 다르면 캐시를 모두 비운다.
 - 팔레트와 사이드 패널이 같은 DB를 함께 쓰므로 WAL과 `busy_timeout` 5초를 쓴다.
 

@@ -28,7 +28,7 @@
 ## ✅ v0.1.2 — issue relations
 
 - The detail view shows the parent, sub-issues, blocked by, blocking, and related issues, colored by state. Open blockers stand out in red.
-- Press `t` or click a line to open a related issue. Esc walks back one issue at a time.
+- Open a related issue from the `t` menu or by clicking its line. Esc walks back one issue at a time.
 - `herdr-linear show` prints the same relations, and they stay readable offline.
 
 ## 🔜 v0.2 — side panel and actions (next)
@@ -92,7 +92,7 @@
 ## ✅ v0.1.2 — 관계 보기
 
 - 상세에 상위·하위·막힘·막는 중·관련 이슈를 상태 색과 함께 보여 줘요. 안 끝난 막는 이슈는 빨강으로 눈에 띄어요.
-- `t`를 누르거나 줄을 클릭하면 그 이슈로 가고, Esc로 한 단계씩 돌아와요.
+- `t` 메뉴나 줄 클릭으로 관계 이슈를 열고, Esc로 한 단계씩 돌아와요.
 - `herdr-linear show`에도 같은 관계가 나오고, 오프라인에서도 볼 수 있어요.
 
 ## 🔜 v0.2 — 사이드 패널과 변경 동작 (다음)

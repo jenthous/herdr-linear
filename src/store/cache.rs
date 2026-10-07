@@ -253,7 +253,7 @@ impl Store {
         Ok(out)
     }
 
-    /// `cutoff_ms`보다 오래 안 받고 안 본 이슈와 그 코멘트를 지운다. 지운 이슈 수.
+    /// `cutoff_ms`보다 오래 안 받고 안 본 이슈와 그 코멘트·관계를 지운다. 지운 이슈 수.
     pub fn evict_older_than(&self, cutoff_ms: i64) -> Result<usize> {
         let n = self.conn.execute(
             "DELETE FROM issues WHERE MAX(fetched_at, COALESCE(viewed_at, 0)) < ?1",
