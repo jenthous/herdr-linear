@@ -2142,4 +2142,51 @@ mod tests {
         app.apply(Msg::AuthFailed { env: false }, T0);
         assert!(app.detail.is_none() && app.detail_stack.is_empty());
     }
+
+    #[test]
+    fn gone_lands_on_stacked_details_too() {
+        let mut app = with_relations();
+        app.handle(Input::ClickRelation(1), T0); // ENG-20을 연다. ENG-1은 쌓인다
+        app.apply(Msg::DetailGone("ENG-1".into()), T0);
+        let cur = app.detail.as_ref().unwrap();
+        assert!(!cur.gone && cur.loading, "지금 상세는 다른 이슈라 그대로");
+        app.handle(Input::Esc, T0);
+        let back = app.detail.as_ref().unwrap();
+        assert!(back.gone && !back.loading);
+    }
+
+    #[test]
+    fn response_without_relations_keeps_the_known_ones() {
+        let mut app = with_relations();
+        let (issue, _) = related();
+        app.apply(detail_msg("a", issue, None, true), T0);
+        assert!(app.detail.as_ref().unwrap().relations.is_some());
+        app.handle(Input::Act(Act::Relations), T0);
+        assert_eq!(app.menu.as_ref().unwrap().title, "관계");
+    }
+
+    #[test]
+    fn unknown_relations_still_list_the_parent() {
+        let mut app = started();
+        app.handle(Input::Enter, T0);
+        let with_parent = IssueBuilder::new("a", "ENG-1", "로그인 버그")
+            .parent("p", "ENG-10", "인증 개편", "started")
+            .build();
+        // 캐시가 먼저 왔고 관계는 아직 모른다
+        app.apply(detail_msg("a", with_parent, None, false), T0);
+        app.handle(Input::Act(Act::Relations), T0);
+        assert_eq!(app.menu.as_ref().unwrap().title, "관계 불러오는 중…");
+        assert_eq!(menu_labels(&app), vec!["상위 ENG-10 인증 개편"]);
+        app.handle(Input::Esc, T0);
+        // 받다가 실패해도 아는 상위는 그대로 보여 준다
+        app.apply(Msg::Failed(ApiError::Offline("x".into())), T0);
+        app.handle(Input::Act(Act::Relations), T0);
+        assert_eq!(app.menu.as_ref().unwrap().title, "관계를 불러오지 못했어요");
+        assert_eq!(menu_labels(&app), vec!["상위 ENG-10 인증 개편"]);
+        assert_eq!(
+            app.handle(Input::Enter, T0),
+            vec![Effect::OpenDetail("p".into())],
+            "알려진 상위는 관계를 몰라도 열 수 있다"
+        );
+    }
 }
