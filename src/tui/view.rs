@@ -22,11 +22,41 @@ const SELECTED_BG: Style = Style::new().bg(Color::Rgb(45, 45, 60));
 const WARN: Style = Style::new().fg(Color::Yellow);
 const ERROR: Style = Style::new().fg(Color::Red);
 
+/// 마우스로 누를 수 있는 대상.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Target {
+    /// 목록의 n번째 줄 (`App::rows` 기준)
+    Row(usize),
+    Tab(Tab),
+    /// 메뉴에 보이는 n번째 항목
+    MenuItem(usize),
+}
+
+/// 화면에서 누를 수 있는 곳.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Hit {
+    pub area: Rect,
+    pub target: Target,
+}
+
 /// 그린 결과.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Drawn {
     /// 상세 화면이면 최대 스크롤
     pub detail_max_scroll: Option<u16>,
+    /// 누를 수 있는 곳. 나중에 그린 것(메뉴)이 뒤에 온다
+    pub hits: Vec<Hit>,
+}
+
+impl Drawn {
+    /// (x, y)에 맨 위로 그려진 대상.
+    pub fn target_at(&self, x: u16, y: u16) -> Option<Target> {
+        self.hits
+            .iter()
+            .rev()
+            .find(|h| h.area.contains(Position::new(x, y)))
+            .map(|h| h.target)
+    }
 }
 
 /// 화면 전체를 그린다.
@@ -43,8 +73,8 @@ pub fn draw(f: &mut Frame, app: &App, now: i64) -> Drawn {
         Constraint::Length(1),
     ])
     .areas(area);
-    draw_header(f, app, header, now);
     let mut drawn = Drawn::default();
+    drawn.hits.extend(draw_header(f, app, header, now));
     if app.mode == Mode::Detail {
         drawn.detail_max_scroll = Some(draw_detail(f, app, search.union(body)));
     } else {
@@ -53,28 +83,39 @@ pub fn draw(f: &mut Frame, app: &App, now: i64) -> Drawn {
             let [list, preview] =
                 Layout::horizontal([Constraint::Percentage(45), Constraint::Percentage(55)])
                     .areas(body);
-            draw_list(f, app, list);
+            drawn.hits.extend(draw_list(f, app, list));
             draw_preview(f, app, preview);
         } else {
-            draw_list(f, app, body);
+            drawn.hits.extend(draw_list(f, app, body));
         }
     }
     draw_footer(f, app, footer, now);
     if app.menu.is_some() {
-        draw_menu(f, app, area);
+        drawn.hits.extend(draw_menu(f, app, area));
     }
     drawn
 }
 
-fn draw_header(f: &mut Frame, app: &App, area: Rect, now: i64) {
+/// 탭 이름의 위치를 함께 돌려준다 (마우스로 탭 전환).
+fn draw_header(f: &mut Frame, app: &App, area: Rect, now: i64) -> Vec<Hit> {
     let mut spans = vec![Span::styled(" Linear ", ACCENT)];
+    let mut hits = Vec::new();
+    let mut x = area.x.saturating_add(spans[0].width() as u16);
     for tab in Tab::ALL {
         spans.push(Span::raw(" "));
-        if tab == app.tab {
-            spans.push(Span::styled(format!("[{}]", tab.title()), ACCENT));
+        x = x.saturating_add(1);
+        let span = if tab == app.tab {
+            Span::styled(format!("[{}]", tab.title()), ACCENT)
         } else {
-            spans.push(Span::styled(tab.title(), DIM));
-        }
+            Span::styled(tab.title(), DIM)
+        };
+        let w = span.width() as u16;
+        hits.push(Hit {
+            area: Rect::new(x, area.y, w, 1).intersection(area),
+            target: Target::Tab(tab),
+        });
+        x = x.saturating_add(w);
+        spans.push(span);
     }
     let status = status_span(app, now);
     let used = Line::from(spans.clone()).width() + status.width() + 1;
@@ -83,6 +124,7 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect, now: i64) {
     ));
     spans.push(status);
     f.render_widget(Paragraph::new(Line::from(spans)), area);
+    hits
 }
 
 /// 상단 오른쪽 상태: 갱신 중 / n분 전 갱신 / 오프라인 / 한도 초과.
@@ -132,7 +174,8 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Paragraph::new(line), area);
 }
 
-fn draw_list(f: &mut Frame, app: &App, area: Rect) {
+/// 목록 줄의 위치를 함께 돌려준다 (마우스로 선택·열기).
+fn draw_list(f: &mut Frame, app: &App, area: Rect) -> Vec<Hit> {
     if app.rows.is_empty() {
         let text = if app.loading > 0 {
             "불러오는 중…"
@@ -140,20 +183,24 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect) {
             "결과가 없어요"
         };
         f.render_widget(Paragraph::new(Span::styled(format!("  {text}"), DIM)), area);
-        return;
+        return Vec::new();
     }
     let width = area.width.saturating_sub(2);
     let mut items = Vec::new();
+    // 화면 줄마다 어느 이슈 줄인지 (머리말·구분선은 None)
+    let mut item_rows: Vec<Option<usize>> = Vec::new();
     let mut selected_item = 0;
     for (i, row) in app.rows.iter().enumerate() {
         if matches!(row, Row::Pinned(_)) {
             items.push(ListItem::new(Span::styled(" 현재 브랜치", DIM)));
+            item_rows.push(None);
         }
         if i > 0 && matches!(app.rows[i - 1], Row::Pinned(_)) {
             items.push(ListItem::new(Span::styled(
                 format!(" {}", "─".repeat(usize::from(width).min(30))),
                 DIM,
             )));
+            item_rows.push(None);
         }
         if i == app.selected {
             selected_item = items.len();
@@ -166,6 +213,7 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect) {
         let mut spans = vec![Span::styled(marker, ACCENT)];
         spans.extend(line.spans);
         items.push(ListItem::new(Line::from(spans)));
+        item_rows.push(Some(i));
     }
     let mut state = ListState::default().with_selected(Some(selected_item));
     f.render_stateful_widget(
@@ -173,6 +221,15 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect) {
         area,
         &mut state,
     );
+    (0..area.height)
+        .filter_map(|k| {
+            let row = (*item_rows.get(state.offset() + usize::from(k))?)?;
+            Some(Hit {
+                area: Rect::new(area.x, area.y + k, area.width, 1),
+                target: Target::Row(row),
+            })
+        })
+        .collect()
 }
 
 /// 이슈 머리: 식별자·제목 / 상태·우선순위·담당자 / 라벨·프로젝트·사이클·상위·예상·마감.
@@ -417,9 +474,10 @@ fn centered(area: Rect, w: u16, h: u16) -> Rect {
     }
 }
 
-fn draw_menu(f: &mut Frame, app: &App, area: Rect) {
+/// 메뉴 항목의 위치를 함께 돌려준다 (마우스로 실행).
+fn draw_menu(f: &mut Frame, app: &App, area: Rect) -> Vec<Hit> {
     let Some(menu) = &app.menu else {
-        return;
+        return Vec::new();
     };
     let items = menu.visible();
     let w = (area.width * 6 / 10).max(30);
@@ -460,6 +518,15 @@ fn draw_menu(f: &mut Frame, app: &App, area: Rect) {
         list,
         &mut state,
     );
+    (0..list.height)
+        .filter_map(|k| {
+            let i = state.offset() + usize::from(k);
+            (i < items.len()).then(|| Hit {
+                area: Rect::new(list.x, list.y + k, list.width, 1),
+                target: Target::MenuItem(i),
+            })
+        })
+        .collect()
 }
 
 fn draw_onboarding(f: &mut Frame, app: &App, area: Rect) {
@@ -781,6 +848,38 @@ mod tests {
             )
             .build();
         assert!(!markdown::to_plain(&issue_header(&merged, 80)).contains("PR #"));
+    }
+
+    #[test]
+    fn drawn_reports_click_targets() {
+        let (_, drawn, _) = screen(&app(), 120, 16);
+        // 목록은 머리·검색 줄 아래 셋째 줄부터
+        assert_eq!(drawn.target_at(3, 2), Some(Target::Row(0)));
+        assert_eq!(drawn.target_at(3, 3), Some(Target::Row(1)));
+        assert_eq!(drawn.target_at(3, 10), None, "줄이 없는 곳");
+        let recent = drawn
+            .hits
+            .iter()
+            .find(|h| h.target == Target::Tab(Tab::Recent))
+            .expect("최근 본 탭");
+        assert_eq!(recent.area.y, 0);
+        assert_eq!(
+            drawn.target_at(recent.area.x + 1, 0),
+            Some(Target::Tab(Tab::Recent))
+        );
+        // 메뉴가 열리면 메뉴 항목이 목록보다 위에 있다
+        let mut a = app();
+        a.handle(Input::Menu, T0);
+        let (_, drawn, _) = screen(&a, 120, 16);
+        let first = drawn
+            .hits
+            .iter()
+            .find(|h| h.target == Target::MenuItem(0))
+            .expect("메뉴 첫 항목");
+        assert_eq!(
+            drawn.target_at(first.area.x + 2, first.area.y),
+            Some(Target::MenuItem(0))
+        );
     }
 
     #[test]

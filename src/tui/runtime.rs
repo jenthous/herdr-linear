@@ -11,7 +11,10 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
 
 use anyhow::Result;
-use ratatui::crossterm::event::{self, DisableBracketedPaste, EnableBracketedPaste, Event};
+use ratatui::crossterm::event::{
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    Event,
+};
 use ratatui::crossterm::execute;
 
 use crate::cli::{
@@ -713,9 +716,9 @@ fn find_branch_issue(
 pub fn run(mut rt: Runtime, mut app: App, effects: Vec<Effect>) -> Result<()> {
     log_panics(rt.paths.log_file());
     let mut terminal = ratatui::init();
-    let _ = execute!(stdout(), EnableBracketedPaste);
+    let _ = execute!(stdout(), EnableBracketedPaste, EnableMouseCapture);
     let result = event_loop(&mut terminal, &mut rt, &mut app, effects);
-    let _ = execute!(stdout(), DisableBracketedPaste);
+    let _ = execute!(stdout(), DisableMouseCapture, DisableBracketedPaste);
     ratatui::restore();
     if let Err(e) = &result {
         rt.log.write(&format!("종료: {e:#}"));
@@ -729,6 +732,8 @@ fn event_loop(
     app: &mut App,
     mut effects: Vec<Effect>,
 ) -> Result<()> {
+    // 마우스로 누른 곳은 마지막으로 그린 화면에서 찾는다
+    let mut last = view::Drawn::default();
     loop {
         let now = now_ms();
         let mut msgs = Vec::new();
@@ -750,13 +755,17 @@ fn event_loop(
         }
         let mut drawn = None;
         terminal.draw(|f| drawn = Some(view::draw(f, app, now)))?;
-        if let Some(max) = drawn.and_then(|d| d.detail_max_scroll) {
-            app.set_detail_max_scroll(max);
+        if let Some(d) = drawn {
+            if let Some(max) = d.detail_max_scroll {
+                app.set_detail_max_scroll(max);
+            }
+            last = d;
         }
         if event::poll(Duration::from_millis(50))? {
             let input = match event::read()? {
                 Event::Key(key) => keys::translate(app.mode, app.menu.is_some(), key),
                 Event::Paste(text) => Some(Input::Paste(text)),
+                Event::Mouse(m) => keys::mouse(&last, m),
                 _ => None,
             };
             if let Some(input) = input {
@@ -770,6 +779,8 @@ fn event_loop(
 fn log_panics(path: PathBuf) {
     let prev = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        // ratatui의 훅이 화면을 되돌린 뒤에 불린다. 마우스·붙여넣기 모드도 끈다
+        let _ = execute!(stdout(), DisableMouseCapture, DisableBracketedPaste);
         Logger::new(path.clone()).write(&format!("패닉: {info}"));
         prev(info);
     }));

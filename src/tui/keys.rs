@@ -1,8 +1,11 @@
 //! 키 입력 → [`Input`]. 한글 입력 중에도 단축키가 먹도록 두벌식 자모를 영문 키로 바꾼다.
 
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use ratatui::crossterm::event::{
+    KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 
 use super::app::{Act, Input, Mode};
+use super::view::{Drawn, Target};
 
 /// 두벌식 자모 → 같은 자리의 영문 키. 자모가 아니면 그대로.
 pub fn jamo_to_latin(c: char) -> char {
@@ -97,6 +100,24 @@ pub fn translate(mode: Mode, menu_open: bool, key: KeyEvent) -> Option<Input> {
         (_, 'q') => Some(Input::Esc),
         (Mode::List, '/') => Some(Input::Search),
         (Mode::Detail, 'u') => act(Act::Links),
+        _ => None,
+    }
+}
+
+/// 마우스 이벤트를 `Input`으로 바꾼다. 누른 곳은 마지막으로 그린 화면(`Drawn`)에서 찾는다.
+pub fn mouse(drawn: &Drawn, ev: MouseEvent) -> Option<Input> {
+    match ev.kind {
+        MouseEventKind::ScrollUp => Some(Input::ScrollUp),
+        MouseEventKind::ScrollDown => Some(Input::ScrollDown),
+        MouseEventKind::Down(MouseButton::Left) => {
+            drawn
+                .target_at(ev.column, ev.row)
+                .map(|target| match target {
+                    Target::Row(i) => Input::ClickRow(i),
+                    Target::Tab(tab) => Input::ClickTab(tab),
+                    Target::MenuItem(i) => Input::ClickMenu(i),
+                })
+        }
         _ => None,
     }
 }
@@ -202,6 +223,59 @@ mod tests {
             Some(Input::Char('j'))
         );
         assert_eq!(translate(Mode::List, true, key(KeyCode::Tab)), None);
+    }
+
+    #[test]
+    fn mouse_wheel_and_clicks_become_inputs() {
+        use crate::tui::app::Tab;
+        use crate::tui::view::{Drawn, Hit, Target};
+        use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+        use ratatui::layout::Rect;
+        let drawn = Drawn {
+            hits: vec![
+                Hit {
+                    area: Rect::new(0, 2, 40, 1),
+                    target: Target::Row(0),
+                },
+                Hit {
+                    area: Rect::new(9, 0, 9, 1),
+                    target: Target::Tab(Tab::Mine),
+                },
+                // 나중에 그린 메뉴가 위에 있다
+                Hit {
+                    area: Rect::new(10, 2, 20, 1),
+                    target: Target::MenuItem(0),
+                },
+            ],
+            ..Drawn::default()
+        };
+        let ev = |kind, column, row| MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        };
+        let left = MouseEventKind::Down(MouseButton::Left);
+        assert_eq!(
+            mouse(&drawn, ev(MouseEventKind::ScrollDown, 5, 5)),
+            Some(Input::ScrollDown)
+        );
+        assert_eq!(
+            mouse(&drawn, ev(MouseEventKind::ScrollUp, 5, 5)),
+            Some(Input::ScrollUp)
+        );
+        assert_eq!(mouse(&drawn, ev(left, 3, 2)), Some(Input::ClickRow(0)));
+        assert_eq!(mouse(&drawn, ev(left, 12, 2)), Some(Input::ClickMenu(0)));
+        assert_eq!(
+            mouse(&drawn, ev(left, 10, 0)),
+            Some(Input::ClickTab(Tab::Mine))
+        );
+        assert_eq!(mouse(&drawn, ev(left, 3, 9)), None, "빈 곳");
+        assert_eq!(
+            mouse(&drawn, ev(MouseEventKind::Down(MouseButton::Right), 3, 2)),
+            None
+        );
+        assert_eq!(mouse(&drawn, ev(MouseEventKind::Moved, 3, 2)), None);
     }
 
     #[test]

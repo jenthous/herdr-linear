@@ -100,6 +100,14 @@ pub enum Input {
     Search,
     Act(Act),
     Quit,
+    /// 마우스 휠
+    ScrollUp,
+    ScrollDown,
+    /// 마우스로 목록의 n번째 줄(`rows` 기준)을 눌렀다. 선택된 줄이면 연다
+    ClickRow(usize),
+    ClickTab(Tab),
+    /// 마우스로 메뉴에 보이는 n번째 항목을 눌렀다
+    ClickMenu(usize),
 }
 
 /// 앱이 런타임에 요청하는 일.
@@ -538,6 +546,15 @@ impl App {
             Input::Top => self.selected = 0,
             Input::Bottom => self.selected = last,
             Input::Enter => return self.act(Act::Open, now),
+            Input::ScrollUp => self.selected = self.selected.saturating_sub(1),
+            Input::ScrollDown => self.selected = (self.selected + 1).min(last),
+            Input::ClickRow(i) if i < self.rows.len() => {
+                if i == self.selected {
+                    return self.act(Act::Open, now);
+                }
+                self.selected = i;
+            }
+            Input::ClickTab(tab) if tab != self.tab => return self.switch_tab(tab, now),
             Input::NextTab | Input::PrevTab => {
                 let tab = if input == Input::NextTab {
                     self.tab.next()
@@ -564,6 +581,8 @@ impl App {
             Input::PageDown => d.scroll = d.scroll.saturating_add(10).min(d.max_scroll),
             Input::Top => d.scroll = 0,
             Input::Bottom => d.scroll = d.max_scroll,
+            Input::ScrollUp => d.scroll = d.scroll.saturating_sub(3),
+            Input::ScrollDown => d.scroll = d.scroll.saturating_add(3).min(d.max_scroll),
             Input::Esc => return self.act(Act::Back, now),
             Input::Act(a) => return self.act(a, now),
             Input::Menu => self.open_menu(),
@@ -577,7 +596,19 @@ impl App {
             return Vec::new();
         };
         let count = menu.visible().len();
+        let input = match input {
+            Input::ScrollUp => Input::Up,
+            Input::ScrollDown => Input::Down,
+            other => other,
+        };
         match input {
+            Input::ClickMenu(i) if i < count => {
+                let act = menu.visible().get(i).map(|(_, a)| a.clone());
+                self.menu = None;
+                if let Some(a) = act {
+                    return self.act(a, now);
+                }
+            }
             Input::Char(c) => {
                 menu.filter.push(c);
                 menu.selected = 0;
@@ -1485,6 +1516,54 @@ mod tests {
             ["URL 복사", "ID 복사"],
             "PR이 없으면 빠진다"
         );
+    }
+
+    #[test]
+    fn mouse_click_selects_then_opens_and_wheel_moves() {
+        let mut app = started();
+        assert!(app.handle(Input::ClickRow(1), T0).is_empty());
+        assert_eq!(app.selected, 1);
+        assert_eq!(
+            app.handle(Input::ClickRow(1), T0),
+            vec![Effect::OpenDetail("b".into())],
+            "선택된 줄을 다시 누르면 연다"
+        );
+        assert_eq!(app.mode, Mode::Detail);
+        app.set_detail_max_scroll(10);
+        app.handle(Input::ScrollDown, T0);
+        assert_eq!(app.detail.as_ref().unwrap().scroll, 3);
+        app.handle(Input::ScrollUp, T0);
+        assert_eq!(app.detail.as_ref().unwrap().scroll, 0);
+        app.handle(Input::Esc, T0);
+        app.handle(Input::ScrollUp, T0);
+        assert_eq!(app.selected, 0);
+        assert_eq!(
+            app.handle(Input::ClickTab(Tab::All), T0),
+            vec![Effect::LoadTab(Tab::All)]
+        );
+        assert_eq!(app.tab, Tab::All);
+        assert!(app.handle(Input::ClickRow(99), T0).is_empty(), "없는 줄");
+    }
+
+    #[test]
+    fn mouse_runs_menu_items_and_wheel_moves_the_menu() {
+        let mut app = started();
+        app.handle(Input::Menu, T0);
+        app.handle(Input::ScrollDown, T0);
+        assert_eq!(app.menu.as_ref().unwrap().selected, 1);
+        assert_eq!(
+            app.handle(Input::ClickMenu(0), T0),
+            vec![Effect::Copy {
+                text: "https://linear.app/acme/issue/ENG-1".into(),
+                what: "ENG-1 URL".into()
+            }],
+            "누른 항목을 바로 실행한다"
+        );
+        assert!(app.menu.is_none());
+        let mut onboarding = App::onboarding(false);
+        assert!(onboarding.handle(Input::ClickRow(0), T0).is_empty());
+        assert!(onboarding.handle(Input::ScrollDown, T0).is_empty());
+        assert!(onboarding.key_input.is_empty());
     }
 
     #[test]
