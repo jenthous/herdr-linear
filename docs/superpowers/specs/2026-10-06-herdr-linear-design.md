@@ -3,6 +3,7 @@
 - 작성일: 2026-10-06
 - 상태: 사용자 리뷰 대기
 - 근거 리서치: `docs/research/2026-10-06-herdr-linear-landscape.md`
+- 2026-10-07 공개하면서 herdr 플러그인 id를 `jh.linear`로 바꿨다. 같은 id를 쓰는 다른 Linear 플러그인과 겹치지 않게 하려는 것이다. 앱·바이너리·CLI 디렉터리 이름은 `herdr-linear` 그대로다. 아래 매니페스트·단축키·플러그인 디렉터리의 `herdr-linear`는 `jh.linear`로 읽는다(예: `jh.linear.palette`, `~/.config/herdr/plugins/config/jh.linear`).
 
 ## 1. 목적
 

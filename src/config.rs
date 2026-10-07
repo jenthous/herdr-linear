@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 
-pub const PLUGIN_ID: &str = "herdr-linear";
+/// herdr 플러그인 id. 액션은 `jh.linear.<액션>`이 되고, herdr가 주는 설정·상태 디렉터리 이름이 된다.
+pub const PLUGIN_ID: &str = "jh.linear";
+/// 앱 이름. herdr 밖(CLI)에서 쓰는 설정·상태 디렉터리 이름이다.
+pub const APP_NAME: &str = "herdr-linear";
 
 pub const DEFAULT_AGENT_TEMPLATE: &str = "{instruction}\n\nLinear 이슈 {identifier}: {title}\n{url}\n상태: {state} · 우선순위: {priority} · 라벨: {labels}\n\n{description}\n{comments}\n";
 
@@ -33,13 +36,13 @@ impl Paths {
         let home = var("HOME");
         let config_dir = var("HERDR_PLUGIN_CONFIG_DIR")
             .or_else(|| var("HERDR_LINEAR_CONFIG_DIR"))
-            .or_else(|| home.as_ref().map(|h| h.join(".config").join(PLUGIN_ID)))
+            .or_else(|| home.as_ref().map(|h| h.join(".config").join(APP_NAME)))
             .ok_or_else(|| anyhow!("설정 디렉터리를 정할 수 없어요 (HOME이 없어요)"))?;
         let state_dir = var("HERDR_PLUGIN_STATE_DIR")
             .or_else(|| var("HERDR_LINEAR_STATE_DIR"))
             .or_else(|| {
                 home.as_ref()
-                    .map(|h| h.join(".local").join("state").join(PLUGIN_ID))
+                    .map(|h| h.join(".local").join("state").join(APP_NAME))
             })
             .ok_or_else(|| anyhow!("상태 디렉터리를 정할 수 없어요 (HOME이 없어요)"))?;
         Ok(Paths {
@@ -198,7 +201,7 @@ impl std::fmt::Debug for ApiKey {
 /// 설정 디렉터리가 다르다. 한쪽에서 로그인한 키를 다른 쪽에서도 찾도록 보조로 읽는 위치.
 pub fn credential_fallbacks(home: &Path) -> Vec<PathBuf> {
     vec![
-        home.join(".config").join(PLUGIN_ID).join("credentials"),
+        home.join(".config").join(APP_NAME).join("credentials"),
         home.join(".config")
             .join("herdr")
             .join("plugins")
@@ -569,7 +572,7 @@ mod tests {
             f,
             vec![
                 PathBuf::from("/home/me/.config/herdr-linear/credentials"),
-                PathBuf::from("/home/me/.config/herdr/plugins/config/herdr-linear/credentials"),
+                PathBuf::from("/home/me/.config/herdr/plugins/config/jh.linear/credentials"),
             ]
         );
     }

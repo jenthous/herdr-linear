@@ -134,7 +134,7 @@ mod tests {
                 "pane",
                 "open",
                 "--plugin",
-                "herdr-linear",
+                "jh.linear",
                 "--entrypoint",
                 "palette",
                 "--focus",

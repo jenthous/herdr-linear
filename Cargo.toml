@@ -5,6 +5,7 @@ edition = "2024"
 rust-version = "1.88"
 description = "Fast Linear lookup for herdr"
 license = "MIT"
+repository = "https://github.com/jenthous/herdr-linear"
 
 [dependencies]
 anyhow = "1.0.104"

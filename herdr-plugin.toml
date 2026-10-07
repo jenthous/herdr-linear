@@ -1,4 +1,4 @@
-id = "herdr-linear"
+id = "jh.linear"
 name = "Linear"
 version = "0.1.0"
 min_herdr_version = "0.9.3"

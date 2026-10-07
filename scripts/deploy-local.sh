@@ -9,6 +9,7 @@ cd "$(dirname "$0")/.."
 dest="${HERDR_LINEAR_DEPLOY_DIR:-$HOME/.local/share/herdr-linear/plugin}"
 bin_dir="${HERDR_LINEAR_BIN_DIR:-$HOME/.local/bin}"
 herdr="${HERDR_BIN_PATH:-herdr}"
+id="jh.linear"
 
 cargo build --release
 mkdir -p "$dest/target/release" "$bin_dir"
@@ -17,12 +18,16 @@ cp herdr-plugin.toml "$dest/herdr-plugin.toml"
 cp target/release/herdr-linear "$dest/target/release/herdr-linear.new"
 mv -f "$dest/target/release/herdr-linear.new" "$dest/target/release/herdr-linear"
 
-# 다른 위치(예: 개발 저장소)에 연결돼 있으면 배포 위치로 옮긴다
-if ! "$herdr" plugin list 2>/dev/null | grep -F "herdr-linear (" | grep -qF "local:$dest]"; then
+# 예전 id(herdr-linear)로 이 저장소나 배포 위치를 연결해 둔 것이 있으면 뗀다
+if "$herdr" plugin list 2>/dev/null | grep -F "herdr-linear (" | grep -qE "local:($dest|$(pwd))\]"; then
     "$herdr" plugin unlink herdr-linear >/dev/null 2>&1 || true
+fi
+# 다른 위치(예: 개발 저장소)에 연결돼 있으면 배포 위치로 옮긴다
+if ! "$herdr" plugin list 2>/dev/null | grep -F "$id (" | grep -qF "local:$dest]"; then
+    "$herdr" plugin unlink "$id" >/dev/null 2>&1 || true
     "$herdr" plugin link "$dest" >/dev/null
 fi
 ln -sf "$dest/target/release/herdr-linear" "$bin_dir/herdr-linear"
 
 echo "배포했어요: $dest"
-"$herdr" plugin list 2>/dev/null | grep -F "herdr-linear (" || true
+"$herdr" plugin list 2>/dev/null | grep -F "$id (" || true
