@@ -12,6 +12,7 @@ use crate::linear::client::{ApiError, LinearClient};
 use crate::linear::filter::{build_issue_filter, token_filter};
 use crate::linear::queries;
 use crate::linear::types::{Comment, Issue, TeamRef, Viewer};
+use crate::log::Logger;
 use crate::markdown::{self, Theme};
 use crate::search::query::parse;
 use crate::search::rank::{SearchIndex, merge, sort_mine};
@@ -156,7 +157,11 @@ pub fn run(cli: Cli) -> Result<String> {
             let ctx = PluginContext::parse(
                 &std::env::var("HERDR_PLUGIN_CONTEXT_JSON").unwrap_or_default(),
             );
-            open_palette(&Herdr::from_env(), &Origin::from_context(&ctx))?;
+            open_palette(
+                &Herdr::from_env(),
+                &Origin::from_context(&ctx),
+                &Logger::new(paths.log_file()),
+            )?;
             return Ok(String::new());
         }
         Command::Ui {

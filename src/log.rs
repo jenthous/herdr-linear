@@ -28,13 +28,28 @@ impl Logger {
             chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
             crate::markdown::sanitize(msg).replace('\n', " ")
         );
-        if let Ok(mut f) = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.path)
-        {
+        let open = || {
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&self.path)
+        };
+        // 처음 실행이면 상태 디렉터리가 아직 없을 수 있다 (캐시를 열기 전에 실패한 경우)
+        let file = open().or_else(|e| match self.path.parent() {
+            Some(dir) if e.kind() == std::io::ErrorKind::NotFound => {
+                crate::config::ensure_private_dir(dir).map_err(std::io::Error::other)?;
+                open()
+            }
+            _ => Err(e),
+        });
+        if let Ok(mut f) = file {
             let _ = f.write_all(line.as_bytes());
         }
+    }
+
+    /// 실패면 `what: 오류`로 한 줄 남기고 결과를 그대로 돌려준다.
+    pub fn on_err<T>(&self, what: &str, r: anyhow::Result<T>) -> anyhow::Result<T> {
+        r.inspect_err(|e| self.write(&format!("{what}: {e:#}")))
     }
 }
 
@@ -54,5 +69,19 @@ mod tests {
         log.write("새 파일");
         assert!(fs::read_to_string(&path).unwrap().ends_with("새 파일\n"));
         assert!(dir.path().join("herdr-linear.log.1").exists());
+    }
+
+    #[test]
+    fn creates_the_state_dir_and_logs_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state").join("herdr-linear.log");
+        let log = Logger::new(path.clone());
+        let r: anyhow::Result<()> = Err(anyhow::anyhow!("키 파일을 읽지 못했어요"));
+        assert!(log.on_err("팔레트 시작", r).is_err());
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(
+            text.ends_with("팔레트 시작: 키 파일을 읽지 못했어요\n"),
+            "{text:?}"
+        );
     }
 }

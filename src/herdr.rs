@@ -7,6 +7,7 @@ use anyhow::{Context, Result, bail};
 
 use crate::config::PLUGIN_ID;
 use crate::context::Origin;
+use crate::log::Logger;
 
 pub struct Herdr {
     bin: PathBuf,
@@ -77,12 +78,14 @@ impl Herdr {
 }
 
 /// `open palette`·`open url` 액션: 원래 pane의 맥락을 팔레트 pane에 넘겨 띄운다.
-/// 실패하면 액션 출력은 보이지 않으니 herdr 알림으로도 알린다.
-pub fn open_palette(herdr: &Herdr, origin: &Origin) -> Result<()> {
+/// 실패하면 액션 출력은 보이지 않으니 로그에 남기고 herdr 알림으로도 알린다.
+pub fn open_palette(herdr: &Herdr, origin: &Origin, log: &Logger) -> Result<()> {
     herdr
         .open_pane("palette", &origin.to_env())
         .inspect_err(|e| {
-            let _ = herdr.notify("Linear", &format!("팔레트를 열지 못했어요: {e:#}"));
+            let text = format!("팔레트를 열지 못했어요: {e:#}");
+            log.write(&text);
+            let _ = herdr.notify("Linear", &text);
         })
 }
 
@@ -126,7 +129,8 @@ mod tests {
         let ctx = PluginContext::parse(
             r#"{"focused_pane_id":"w1:p2","focused_pane_cwd":"/repo app","selected_text":"eng-7"}"#,
         );
-        open_palette(&herdr, &Origin::from_context(&ctx)).unwrap();
+        let log = Logger::new(dir.path().join("herdr-linear.log"));
+        open_palette(&herdr, &Origin::from_context(&ctx), &log).unwrap();
         assert_eq!(
             calls(dir.path()),
             vec![vec![
@@ -152,8 +156,12 @@ mod tests {
     fn busy_herdr_is_reported_by_notification() {
         let dir = tempfile::tempdir().unwrap();
         let herdr = Herdr::new(fake_herdr(dir.path(), Some("error: ui_busy")));
-        let err = open_palette(&herdr, &Origin::default()).unwrap_err();
+        let log_path = dir.path().join("herdr-linear.log");
+        let err =
+            open_palette(&herdr, &Origin::default(), &Logger::new(log_path.clone())).unwrap_err();
         assert!(err.to_string().contains("다른 창이 떠 있어요"), "{err}");
+        let logged = std::fs::read_to_string(&log_path).unwrap();
+        assert!(logged.contains("팔레트를 열지 못했어요"), "{logged}");
         let calls = calls(dir.path());
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[1][..4], ["notification", "show", "Linear", "--body"]);
