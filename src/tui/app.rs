@@ -1783,4 +1783,14 @@ mod tests {
         app.handle(Input::Top, T0);
         assert_eq!(app.detail.as_ref().unwrap().scroll, 0);
     }
+
+    #[test]
+    fn quit_from_a_detail_opened_in_search_mode_closes() {
+        let mut app = started();
+        app.handle(Input::Enter, T0);
+        assert_eq!(app.mode, Mode::Detail);
+        app.handle(Input::Act(Act::Quit), T0);
+        assert!(app.quit);
+        assert_eq!(app.query, "", "검색어에 들어가지 않는다");
+    }
 }

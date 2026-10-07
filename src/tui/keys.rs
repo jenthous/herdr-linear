@@ -97,7 +97,7 @@ pub fn translate(mode: Mode, menu_open: bool, key: KeyEvent) -> Option<Input> {
         (_, 'y') => act(Act::CopyUrl),
         (_, 'Y') => act(Act::CopyPr),
         (_, 'r') => act(Act::Refresh),
-        (_, 'q') => Some(Input::Esc),
+        (_, 'q') => act(Act::Quit),
         (Mode::List, '/') => Some(Input::Search),
         (Mode::Detail, 'u') => act(Act::Links),
         _ => None,
@@ -199,7 +199,7 @@ mod tests {
         );
         assert_eq!(
             translate(Mode::List, false, key(KeyCode::Char('ㅂ'))),
-            Some(Input::Esc)
+            Some(Input::Act(Act::Quit))
         );
         assert_eq!(translate(Mode::List, false, key(KeyCode::Char('u'))), None);
     }
@@ -283,5 +283,20 @@ mod tests {
         let mut ev = key(KeyCode::Char('j'));
         ev.kind = KeyEventKind::Release;
         assert_eq!(translate(Mode::List, false, ev), None);
+    }
+
+    #[test]
+    fn q_closes_in_list_and_detail_but_types_in_search() {
+        for mode in [Mode::List, Mode::Detail] {
+            assert_eq!(
+                translate(mode, false, key(KeyCode::Char('q'))),
+                Some(Input::Act(Act::Quit)),
+                "{mode:?}"
+            );
+        }
+        assert_eq!(
+            translate(Mode::Search, false, key(KeyCode::Char('q'))),
+            Some(Input::Char('q'))
+        );
     }
 }

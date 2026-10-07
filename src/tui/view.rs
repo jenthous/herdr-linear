@@ -424,7 +424,7 @@ fn hints(mode: Mode) -> &'static str {
     match mode {
         Mode::Search => " ⏎ 상세  Tab 보기  ↑↓ 이동  ^K 메뉴  Esc 목록 모드",
         Mode::List => " j/k 이동  / 검색  ⏎ 상세  y URL 복사  Y PR 링크  ^K 메뉴  q 닫기",
-        Mode::Detail => " j/k 스크롤  u 링크  y URL 복사  Y PR 링크  ^K 메뉴  Esc 뒤로",
+        Mode::Detail => " j/k 스크롤  u 링크  y URL 복사  Y PR 링크  ^K 메뉴  Esc 뒤로  q 닫기",
         Mode::Onboarding => " ⏎ 확인  Esc 닫기",
     }
 }
@@ -722,6 +722,7 @@ mod tests {
             "{rows:?}"
         );
         assert!(drawn.detail_max_scroll.unwrap() > 0);
+        assert!(rows[11].ends_with("Esc 뒤로  q 닫기"), "{}", rows[11]);
     }
 
     #[test]
