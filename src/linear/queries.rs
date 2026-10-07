@@ -11,7 +11,7 @@ pub const DEEP_SEARCH_SIZE: i64 = 20;
 pub const COMMENT_PAGE_SIZE: i64 = 50;
 
 /// 이슈 하나에 대해 가져오는 필드. `Issue`와 `IssueSearchResult`에 똑같이 쓴다.
-const ISSUE_SELECTION: &str = "id identifier number title description priority estimate url branchName dueDate createdAt updatedAt archivedAt trashed team { id key name } state { id name type color } assignee { id name displayName } project { id name } cycle { id number name } parent { id identifier title } labels(first: 20) { nodes { id name color } }";
+const ISSUE_SELECTION: &str = "id identifier number title description priority estimate url branchName dueDate createdAt updatedAt archivedAt trashed team { id key name } state { id name type color } assignee { id name displayName } project { id name } cycle { id number name } parent { id identifier title } labels(first: 20) { nodes { id name color } } attachments(first: 10) { nodes { url sourceType createdAt metadata } }";
 
 pub fn issue_fragment() -> String {
     format!("fragment IssueFields on Issue {{ {ISSUE_SELECTION} }}")
@@ -179,6 +179,28 @@ mod tests {
         let v = viewer(&client(&server)).unwrap();
         assert_eq!(v.organization.name, "Acme");
         assert_eq!(v.teams.nodes[0].key, "ENG");
+    }
+
+    #[test]
+    fn issue_queries_ask_for_attachments() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/graphql")
+            .match_body(Matcher::Regex(
+                r"attachments\(first: 10\) \{ nodes \{ url sourceType createdAt metadata \} \}".into(),
+            ))
+            .with_body(
+                json!({ "data": { "issues": {
+                    "nodes": [ IssueBuilder::new("i1", "ENG-1", "첫 이슈")
+                        .pr("https://github.com/acme/web/pull/3", "open", 3, "2026-10-01T00:00:00.000Z")
+                        .json() ],
+                    "pageInfo": { "hasNextPage": false, "endCursor": null }
+                } } })
+                .to_string(),
+            )
+            .create();
+        let issues = my_issues(&client(&server)).unwrap();
+        assert_eq!(issues[0].open_pr().unwrap().label(), "PR #3");
     }
 
     #[test]

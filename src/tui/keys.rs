@@ -91,8 +91,8 @@ pub fn translate(mode: Mode, menu_open: bool, key: KeyEvent) -> Option<Input> {
         (_, 'g') => Some(Input::Top),
         (_, 'G') => Some(Input::Bottom),
         (_, 'o') => act(Act::Browser),
-        (_, 'y') => act(Act::CopyId),
-        (_, 'Y') => act(Act::CopyUrl),
+        (_, 'y') => act(Act::CopyUrl),
+        (_, 'Y') => act(Act::CopyPr),
         (_, 'r') => act(Act::Refresh),
         (_, 'q') => Some(Input::Esc),
         (Mode::List, '/') => Some(Input::Search),
@@ -162,7 +162,7 @@ mod tests {
         );
         assert_eq!(
             translate(Mode::List, false, key(KeyCode::Char('ㅛ'))),
-            Some(Input::Act(Act::CopyId))
+            Some(Input::Act(Act::CopyUrl))
         );
         assert_eq!(
             translate(
@@ -170,7 +170,7 @@ mod tests {
                 false,
                 KeyEvent::new(KeyCode::Char('Y'), KeyModifiers::SHIFT)
             ),
-            Some(Input::Act(Act::CopyUrl))
+            Some(Input::Act(Act::CopyPr))
         );
         assert_eq!(
             translate(Mode::List, false, key(KeyCode::Char('/'))),

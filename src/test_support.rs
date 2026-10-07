@@ -75,6 +75,26 @@ impl IssueBuilder {
         self
     }
 
+    /// GitHub PR 첨부를 더한다 (`status`: open·merged·closed).
+    pub fn pr(mut self, url: &str, status: &str, number: i64, created_at: &str) -> Self {
+        if self.0.get("attachments").is_none() {
+            self.0["attachments"] = json!({ "nodes": [] });
+        }
+        self.0["attachments"]["nodes"]
+            .as_array_mut()
+            .expect("attachments.nodes")
+            .push(json!({
+                "url": url,
+                "sourceType": "github",
+                "createdAt": created_at,
+                "metadata": {
+                    "status": status, "number": number as f64, "repoName": "web",
+                    "draft": false, "reviewers": [], "title": "PR 제목"
+                }
+            }));
+        self
+    }
+
     pub fn json(self) -> Value {
         self.0
     }

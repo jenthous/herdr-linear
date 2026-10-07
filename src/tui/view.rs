@@ -214,6 +214,19 @@ pub fn issue_header(issue: &Issue, width: u16) -> Vec<Line<'static>> {
         None => meta.push(Span::styled(" · 담당자 없음", DIM)),
     }
     lines.push(Line::from(meta));
+    if let Some(pr) = issue.open_pr() {
+        let mut text = format!("{} 열림", pr.label());
+        if pr.draft {
+            text.push_str(" (초안)");
+        }
+        if let Some(repo) = &pr.repo {
+            text.push_str(&format!(" · {}", sanitize(repo)));
+        }
+        lines.push(Line::from(Span::styled(
+            text,
+            Style::new().fg(Color::Green),
+        )));
+    }
     let mut extra: Vec<Span<'static>> = Vec::new();
     for label in &issue.labels.nodes {
         if !extra.is_empty() {
@@ -363,8 +376,8 @@ fn draw_detail(f: &mut Frame, app: &App, area: Rect) -> u16 {
 fn hints(mode: Mode) -> &'static str {
     match mode {
         Mode::Search => " ⏎ 상세  Tab 보기  ↑↓ 이동  ^K 메뉴  Esc 목록 모드",
-        Mode::List => " j/k 이동  / 검색  ⏎ 상세  o 브라우저  y ID 복사  ^K 메뉴  q 닫기",
-        Mode::Detail => " j/k 스크롤  u 링크  o 브라우저  y ID 복사  ^K 메뉴  Esc 뒤로",
+        Mode::List => " j/k 이동  / 검색  ⏎ 상세  y URL 복사  Y PR 링크  ^K 메뉴  q 닫기",
+        Mode::Detail => " j/k 스크롤  u 링크  y URL 복사  Y PR 링크  ^K 메뉴  Esc 뒤로",
         Mode::Onboarding => " ⏎ 확인  Esc 닫기",
     }
 }
@@ -745,6 +758,29 @@ mod tests {
             text.contains("예상 3") && text.contains("마감 2026-10-31"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn header_shows_open_pr_only() {
+        let open = IssueBuilder::new("a", "ENG-1", "로그인 버그")
+            .pr(
+                "https://github.com/acme/web/pull/15",
+                "open",
+                15,
+                "2026-10-05T00:00:00.000Z",
+            )
+            .build();
+        let text = markdown::to_plain(&issue_header(&open, 80));
+        assert!(text.contains("PR #15 열림 · web"), "{text}");
+        let merged = IssueBuilder::new("b", "ENG-2", "결제")
+            .pr(
+                "https://github.com/acme/web/pull/9",
+                "merged",
+                9,
+                "2026-10-01T00:00:00.000Z",
+            )
+            .build();
+        assert!(!markdown::to_plain(&issue_header(&merged, 80)).contains("PR #"));
     }
 
     #[test]

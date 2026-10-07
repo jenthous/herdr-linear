@@ -69,6 +69,8 @@ pub enum Act {
     Browser,
     CopyId,
     CopyUrl,
+    /// 열린 PR 링크
+    CopyPr,
     Refresh,
     DeepSearch,
     Links,
@@ -602,13 +604,20 @@ impl App {
     fn open_menu(&mut self) {
         let mut items: Vec<(String, Act)> = Vec::new();
         let has_issue = self.current_issue().is_some();
+        // 가장 많이 쓰는 티켓 URL 복사를 맨 위에 둔다
+        if let Some(issue) = self.current_issue() {
+            let pr = issue.open_pr();
+            items.push(("URL 복사".into(), Act::CopyUrl));
+            if let Some(pr) = pr {
+                items.push((format!("PR 링크 복사 ({})", pr.label()), Act::CopyPr));
+            }
+            items.push(("ID 복사".into(), Act::CopyId));
+        }
         if self.mode != Mode::Detail && has_issue {
             items.push(("상세 보기".into(), Act::Open));
         }
         if has_issue {
             items.push(("브라우저에서 열기".into(), Act::Browser));
-            items.push(("ID 복사".into(), Act::CopyId));
-            items.push(("URL 복사".into(), Act::CopyUrl));
         }
         if self.mode == Mode::Detail {
             items.push(("링크·이미지 목록".into(), Act::Links));
@@ -745,6 +754,22 @@ impl App {
                     }]
                 })
                 .unwrap_or_default(),
+            Act::CopyPr => {
+                let Some(issue) = self.current_issue() else {
+                    return Vec::new();
+                };
+                match issue.open_pr() {
+                    Some(pr) => vec![Effect::Copy {
+                        text: pr.url.clone(),
+                        what: pr.label(),
+                    }],
+                    None => {
+                        let text = format!("{}에 열린 PR이 없어요", issue.identifier);
+                        self.set_flash(text, now);
+                        Vec::new()
+                    }
+                }
+            }
             Act::Refresh => {
                 if self.mode == Mode::Detail {
                     if let Some(d) = self.detail.as_mut() {
@@ -1387,6 +1412,79 @@ mod tests {
         app.handle(Input::Esc, T0);
         app.handle(Input::Esc, T0);
         assert!(app.quit);
+    }
+
+    fn with_pr() -> App {
+        let (mut app, _) = App::start(None);
+        app.apply(
+            tab_msg(
+                Tab::Mine,
+                vec![
+                    IssueBuilder::new("a", "ENG-1", "로그인 버그")
+                        .pr(
+                            "https://github.com/acme/web/pull/15",
+                            "open",
+                            15,
+                            "2026-10-05T00:00:00.000Z",
+                        )
+                        .build(),
+                    issue("b", "ENG-2", "결제 화면"),
+                ],
+                true,
+            ),
+            T0,
+        );
+        app
+    }
+
+    #[test]
+    fn copy_keys_put_issue_url_first_and_open_pr_second() {
+        let mut app = with_pr();
+        app.handle(Input::Esc, T0);
+        assert_eq!(
+            app.handle(Input::Act(Act::CopyUrl), T0),
+            vec![Effect::Copy {
+                text: "https://linear.app/acme/issue/ENG-1".into(),
+                what: "ENG-1 URL".into()
+            }]
+        );
+        assert_eq!(
+            app.handle(Input::Act(Act::CopyPr), T0),
+            vec![Effect::Copy {
+                text: "https://github.com/acme/web/pull/15".into(),
+                what: "PR #15".into()
+            }]
+        );
+        app.handle(Input::Down, T0);
+        assert!(app.handle(Input::Act(Act::CopyPr), T0).is_empty());
+        assert_eq!(app.flash_text(T0), Some("ENG-2에 열린 PR이 없어요"));
+    }
+
+    #[test]
+    fn menu_starts_with_url_copy_then_pr_then_id() {
+        let labels = |app: &App| -> Vec<String> {
+            app.menu
+                .as_ref()
+                .unwrap()
+                .visible()
+                .iter()
+                .map(|(l, _)| l.clone())
+                .collect()
+        };
+        let mut app = with_pr();
+        app.handle(Input::Menu, T0);
+        assert_eq!(
+            labels(&app)[..3],
+            ["URL 복사", "PR 링크 복사 (PR #15)", "ID 복사"]
+        );
+        app.handle(Input::Esc, T0);
+        app.handle(Input::Down, T0);
+        app.handle(Input::Menu, T0);
+        assert_eq!(
+            labels(&app)[..2],
+            ["URL 복사", "ID 복사"],
+            "PR이 없으면 빠진다"
+        );
     }
 
     #[test]

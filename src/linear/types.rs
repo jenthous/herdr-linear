@@ -35,6 +35,9 @@ pub struct Issue {
     pub cycle: Option<CycleRef>,
     pub parent: Option<ParentRef>,
     pub labels: Nodes<LabelRef>,
+    /// 연결된 링크(GitHub PR 등). 예전 캐시에는 없을 수 있다
+    #[serde(default)]
+    pub attachments: Nodes<Attachment>,
 }
 
 impl Issue {
@@ -46,11 +49,108 @@ impl Issue {
     pub fn label_names(&self) -> Vec<&str> {
         self.labels.nodes.iter().map(|l| l.name.as_str()).collect()
     }
+
+    /// 연결된 열린 PR. 여러 개면 가장 최근에 연결된 것.
+    pub fn open_pr(&self) -> Option<PullRequest> {
+        self.attachments
+            .nodes
+            .iter()
+            .filter(|a| pr_number(&a.url).is_some())
+            .filter(|a| {
+                a.metadata
+                    .as_ref()
+                    .and_then(|m| m.status.as_deref())
+                    .is_some_and(|s| {
+                        s.eq_ignore_ascii_case("open") || s.eq_ignore_ascii_case("opened")
+                    })
+            })
+            .max_by(|a, b| a.created_at.cmp(&b.created_at))
+            .map(|a| {
+                let meta = a.metadata.clone().unwrap_or_default();
+                PullRequest {
+                    url: a.url.clone(),
+                    number: meta.number.map(|n| n as i64).or_else(|| pr_number(&a.url)),
+                    repo: meta.repo_name,
+                    draft: meta.draft.unwrap_or(false),
+                }
+            })
+    }
+}
+
+/// GitHub `…/pull/<번호>`, GitLab `…/merge_requests/<번호>` 링크면 그 번호.
+fn pr_number(url: &str) -> Option<i64> {
+    ["/pull/", "/merge_requests/"].iter().find_map(|marker| {
+        let rest = url.split_once(marker)?.1;
+        rest.split(['/', '?', '#']).next()?.parse().ok()
+    })
+}
+
+/// 이슈에 붙은 링크. 쓰는 필드만 받는다.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Attachment {
+    pub url: String,
+    #[serde(default)]
+    pub source_type: Option<String>,
+    #[serde(default)]
+    pub created_at: Option<String>,
+    /// Linear의 metadata는 연동마다 모양이 달라서, 쓰는 값만 너그럽게 읽는다
+    #[serde(default, deserialize_with = "lenient_meta")]
+    pub metadata: Option<AttachmentMeta>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentMeta {
+    pub status: Option<String>,
+    pub number: Option<f64>,
+    pub repo_name: Option<String>,
+    pub draft: Option<bool>,
+}
+
+/// 모양이 다르거나 타입이 맞지 않는 값은 버리고, 이슈 전체를 읽는 데는 실패하지 않는다.
+fn lenient_meta<'de, D: Deserializer<'de>>(d: D) -> Result<Option<AttachmentMeta>, D::Error> {
+    let v = serde_json::Value::deserialize(d)?;
+    if !v.is_object() {
+        return Ok(None);
+    }
+    let text = |k: &str| v.get(k).and_then(|x| x.as_str()).map(str::to_string);
+    Ok(Some(AttachmentMeta {
+        status: text("status"),
+        number: v.get("number").and_then(|x| x.as_f64()),
+        repo_name: text("repoName"),
+        draft: v.get("draft").and_then(|x| x.as_bool()),
+    }))
+}
+
+/// 이슈에 연결된 PR.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PullRequest {
+    pub url: String,
+    pub number: Option<i64>,
+    pub repo: Option<String>,
+    pub draft: bool,
+}
+
+impl PullRequest {
+    /// `PR #482`, 번호를 모르면 `PR`.
+    pub fn label(&self) -> String {
+        match self.number {
+            Some(n) => format!("PR #{n}"),
+            None => "PR".to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Nodes<T> {
     pub nodes: Vec<T>,
+}
+
+impl<T> Default for Nodes<T> {
+    fn default() -> Self {
+        Nodes { nodes: Vec::new() }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -161,6 +261,69 @@ pub struct IssueDetail {
 mod tests {
     use super::*;
     use crate::test_support::IssueBuilder;
+
+    #[test]
+    fn open_pr_picks_the_latest_open_pull_request() {
+        let issue = IssueBuilder::new("a", "ENG-1", "로그인")
+            .pr(
+                "https://github.com/acme/web/pull/10",
+                "merged",
+                10,
+                "2026-10-01T00:00:00.000Z",
+            )
+            .pr(
+                "https://github.com/acme/web/pull/12",
+                "open",
+                12,
+                "2026-10-02T00:00:00.000Z",
+            )
+            .pr(
+                "https://github.com/acme/web/issues/3",
+                "open",
+                3,
+                "2026-10-06T00:00:00.000Z",
+            )
+            .pr(
+                "https://github.com/acme/web/pull/15",
+                "open",
+                15,
+                "2026-10-05T00:00:00.000Z",
+            )
+            .pr(
+                "https://github.com/acme/web/pull/9",
+                "closed",
+                9,
+                "2026-10-07T00:00:00.000Z",
+            )
+            .build();
+        let pr = issue.open_pr().unwrap();
+        assert_eq!(pr.url, "https://github.com/acme/web/pull/15");
+        assert_eq!(pr.label(), "PR #15");
+        assert_eq!(pr.repo.as_deref(), Some("web"));
+        assert!(
+            IssueBuilder::new("b", "ENG-2", "없음")
+                .build()
+                .open_pr()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn odd_attachment_metadata_does_not_break_the_issue() {
+        let mut v = IssueBuilder::new("a", "ENG-1", "로그인").json();
+        v["attachments"] = serde_json::json!({ "nodes": [
+            { "url": "https://github.com/acme/web/pull/7", "sourceType": "github", "metadata": { "status": 123, "number": "x" } },
+            { "url": "https://figma.com/file/abc", "sourceType": "figma", "metadata": null },
+            { "url": "https://github.com/acme/web/pull/8", "sourceType": "github", "metadata": { "status": "open" } }
+        ] });
+        let issue: Issue = serde_json::from_value(v).unwrap();
+        let pr = issue.open_pr().unwrap();
+        assert_eq!(pr.url, "https://github.com/acme/web/pull/8");
+        assert_eq!(pr.label(), "PR #8", "번호가 없으면 URL에서 읽는다");
+        // 캐시에 저장했다 다시 읽어도 같다
+        let back: Issue = serde_json::from_str(&serde_json::to_string(&issue).unwrap()).unwrap();
+        assert_eq!(back.open_pr(), issue.open_pr());
+    }
 
     #[test]
     fn float_numbers_become_integers() {
