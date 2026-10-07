@@ -14,6 +14,8 @@ use crate::markdown::{self, Theme};
 use crate::search::query::parse;
 use crate::search::rank::{SearchIndex, merge, sort_mine};
 use crate::store::{Store, remove_db_files};
+use crate::ui::row::issue_row;
+pub use crate::ui::style::{priority_label, state_icon};
 
 const VIEWER_TTL_MS: i64 = 60 * 60 * 1000;
 const DAY_MS: i64 = 24 * 60 * 60 * 1000;
@@ -71,6 +73,11 @@ pub fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
+/// 색을 쓸지: 표준 출력이 터미널이고 `NO_COLOR`가 비어 있지 않은 값으로 설정되지 않았을 때 (no-color.org).
+pub fn use_color(is_terminal: bool, no_color: Option<&std::ffi::OsStr>) -> bool {
+    is_terminal && no_color.is_none_or(|v| v.is_empty())
+}
+
 impl Ctx {
     pub fn open(paths: Paths) -> Result<Ctx> {
         let (settings, warnings) = config::load_settings(&paths.config_file());
@@ -98,7 +105,10 @@ impl Ctx {
             client: LinearClient::new(key.value),
             key_source: key.source,
             now_ms: now,
-            color: std::io::stdout().is_terminal(),
+            color: use_color(
+                std::io::stdout().is_terminal(),
+                std::env::var_os("NO_COLOR").as_deref(),
+            ),
             width,
         })
     }
@@ -290,10 +300,11 @@ pub fn mine(ctx: &Ctx) -> Result<String> {
             sort_mine(&mut issues);
             let ids: Vec<String> = issues.iter().map(|i| i.id.clone()).collect();
             ctx.store.set_view("mine", &ids, ctx.now_ms)?;
-            Ok(format_list(&issues, None))
+            Ok(format_list(ctx, &issues, None))
         }
         Err(ApiError::Offline(msg)) => match ctx.store.get_view("mine")? {
             Some((issues, at)) => Ok(format_list(
+                ctx,
                 &issues,
                 Some(&format!(
                     "오프라인: {} 저장된 결과 · {msg}",
@@ -334,9 +345,14 @@ pub fn search(ctx: &Ctx, input: &str, deep: bool) -> Result<String> {
             ctx.store.upsert_issues(&found, ctx.now_ms)?;
             let found: Vec<Issue> = found.into_iter().filter(|i| !i.is_gone()).collect();
             let merged = merge(&local, &found, &q, viewer_id);
-            Ok(format_list(&merged[..merged.len().min(SEARCH_LIMIT)], None))
+            Ok(format_list(
+                ctx,
+                &merged[..merged.len().min(SEARCH_LIMIT)],
+                None,
+            ))
         }
         Err(ApiError::Offline(msg)) => Ok(format_list(
+            ctx,
             &local[..local.len().min(SEARCH_LIMIT)],
             Some(&format!("오프라인: 저장된 이슈에서만 찾았어요 · {msg}")),
         )),
@@ -400,28 +416,6 @@ pub fn show(ctx: &Ctx, id: &str) -> Result<String> {
     }
 }
 
-pub fn state_icon(state_type: &str) -> &'static str {
-    match state_type {
-        "triage" => "◇",
-        "backlog" => "◌",
-        "unstarted" => "○",
-        "started" => "◐",
-        "completed" => "●",
-        "canceled" | "duplicate" => "✕",
-        _ => "·",
-    }
-}
-
-pub fn priority_label(p: i64) -> &'static str {
-    match p {
-        1 => "긴급",
-        2 => "높음",
-        3 => "보통",
-        4 => "낮음",
-        _ => "없음",
-    }
-}
-
 pub fn ago(now_ms: i64, then_ms: i64) -> String {
     let mins = (now_ms - then_ms).max(0) / 60_000;
     match mins {
@@ -466,7 +460,8 @@ pub fn issue_line(issue: &Issue) -> String {
     markdown::sanitize(&s)
 }
 
-fn format_list(issues: &[Issue], banner: Option<&str>) -> String {
+/// 목록 출력. 터미널이면 상태·라벨에 Linear 색을 입힌다.
+fn format_list(ctx: &Ctx, issues: &[Issue], banner: Option<&str>) -> String {
     let mut out = Vec::new();
     if let Some(b) = banner {
         out.push(format!("({b})"));
@@ -474,7 +469,13 @@ fn format_list(issues: &[Issue], banner: Option<&str>) -> String {
     if issues.is_empty() {
         out.push("결과가 없어요".to_string());
     }
-    out.extend(issues.iter().map(issue_line));
+    for issue in issues {
+        out.push(if ctx.color {
+            markdown::to_ansi(&[issue_row(issue, ctx.width)])
+        } else {
+            issue_line(issue)
+        });
+    }
     out.join("\n")
 }
 
@@ -1115,5 +1116,35 @@ mod tests {
             scope_warning(&v, &typo).as_deref(),
             Some("경고: config의 teams(EGN)와 맞는 팀이 없어서 모든 팀에서 찾아요")
         );
+    }
+
+    #[test]
+    fn no_color_turns_colors_off() {
+        use std::ffi::OsStr;
+        assert!(use_color(true, None));
+        assert!(use_color(true, Some(OsStr::new(""))), "빈 값은 무시");
+        assert!(!use_color(true, Some(OsStr::new("1"))));
+        assert!(!use_color(false, None), "파이프에는 색을 쓰지 않는다");
+    }
+
+    #[test]
+    fn mine_uses_linear_colors_on_a_terminal() {
+        let mut server = mockito::Server::new();
+        mock_issues(
+            &mut server,
+            vec![
+                IssueBuilder::new("i1", "ENG-1", "색 확인")
+                    .state("In Progress", "started")
+                    .labels(&["bug"])
+                    .json(),
+            ],
+        );
+        let (_d, mut ctx) = test_ctx(url(&server));
+        ctx.color = true;
+        let out = mine(&ctx).unwrap();
+        // 상태 색 #5e6ad2, 라벨 색 #eb5757 (truecolor)
+        assert!(out.contains("\u{1b}[38;2;94;106;210m"), "{out:?}");
+        assert!(out.contains("\u{1b}[38;2;235;87;87m"), "{out:?}");
+        assert!(out.contains("ENG-1"), "{out:?}");
     }
 }

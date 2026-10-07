@@ -6,6 +6,7 @@ pub mod linear;
 pub mod markdown;
 pub mod search;
 pub mod store;
+pub mod ui;
 
 #[cfg(test)]
 pub mod test_support;

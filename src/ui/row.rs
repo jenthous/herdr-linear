@@ -1,0 +1,87 @@
+//! 목록 한 줄.
+
+use ratatui::text::{Line, Span};
+
+use super::style::{DIM, label_style, state_icon, state_style, truncate};
+use crate::linear::types::Issue;
+use crate::markdown::sanitize;
+
+/// 제목이 이보다 좁아지면 라벨과 담당자를 숨긴다.
+const MIN_TITLE: usize = 12;
+
+/// 목록 한 줄: 상태 아이콘(상태 색) · 식별자 · 제목 · 라벨(라벨 색) · @담당자.
+/// 폭이 모자라면 라벨·담당자를 먼저 빼고, 그래도 넘치면 제목을 `…`로 줄인다.
+pub fn issue_row(issue: &Issue, width: u16) -> Line<'static> {
+    let width = usize::from(width);
+    let icon = Span::styled(
+        format!("{} ", state_icon(&issue.state.state_type)),
+        state_style(&issue.state),
+    );
+    let id = Span::styled(format!("{:<9} ", issue.identifier), DIM);
+    let fixed = icon.width() + id.width();
+    let mut tail: Vec<Span<'static>> = Vec::new();
+    for (i, label) in issue.labels.nodes.iter().enumerate() {
+        tail.push(Span::raw(if i == 0 { "  " } else { " " }));
+        tail.push(Span::styled(sanitize(&label.name), label_style(label)));
+    }
+    if let Some(a) = &issue.assignee {
+        tail.push(Span::styled(
+            format!("  @{}", sanitize(&a.display_name)),
+            DIM,
+        ));
+    }
+    let tail_width: usize = tail.iter().map(Span::width).sum();
+    let title = sanitize(&issue.title);
+    let (room, tail) = if fixed + MIN_TITLE + tail_width <= width {
+        (width - fixed - tail_width, tail)
+    } else {
+        (width.saturating_sub(fixed), Vec::new())
+    };
+    let mut spans = vec![icon, id, Span::raw(truncate(&title, room))];
+    spans.extend(tail);
+    Line::from(spans)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::markdown::to_plain;
+    use crate::test_support::IssueBuilder;
+    use ratatui::style::Color;
+
+    fn issue() -> Issue {
+        IssueBuilder::new("i1", "UP-1812", "데이터 손상 수정")
+            .state("In Progress", "started")
+            .labels(&["Bug", "Backend"])
+            .assignee("u1", "jhhan")
+            .build()
+    }
+
+    #[test]
+    fn row_shows_colored_icon_labels_and_assignee() {
+        let line = issue_row(&issue(), 80);
+        assert_eq!(
+            to_plain(std::slice::from_ref(&line)),
+            "◐ UP-1812   데이터 손상 수정  Bug Backend  @jhhan"
+        );
+        assert_eq!(line.spans[0].style.fg, Some(Color::Rgb(94, 106, 210)));
+        let bug = line.spans.iter().find(|s| s.content == "Bug").unwrap();
+        assert_eq!(bug.style.fg, Some(Color::Rgb(235, 87, 87)));
+    }
+
+    #[test]
+    fn narrow_row_drops_tail_then_truncates_title() {
+        let line = issue_row(&issue(), 24);
+        let text = to_plain(std::slice::from_ref(&line));
+        assert!(!text.contains("Bug"), "{text}");
+        assert!(line.width() <= 24, "{text}");
+        assert!(text.ends_with('…'), "{text}");
+    }
+
+    #[test]
+    fn row_strips_control_characters() {
+        let i = IssueBuilder::new("i1", "UP-1", "제목\u{1b}[2J").build();
+        let text = to_plain(&[issue_row(&i, 80)]);
+        assert!(!text.contains('\u{1b}'), "{text:?}");
+    }
+}
