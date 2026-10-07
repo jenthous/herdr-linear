@@ -66,10 +66,16 @@ pub fn sanitize(s: &str) -> String {
 }
 
 /// markdown을 `width` 칸에 맞춰 그린다. 폭은 최소 10칸으로 본다.
-/// 그리기 전에 NFC로 정규화하고 제어 문자를 지운다.
+/// 그리기 전에 NFC로 정규화하고 제어 문자를 지운다. 이슈 식별자 형식은 모두 강조한다.
 pub fn render(md: &str, width: u16, theme: &Theme) -> Rendered {
+    render_with(md, width, theme, &[])
+}
+
+/// `render`와 같되, `team_keys`가 있으면 그 팀 키의 식별자만 강조한다 (`UTF-8` 같은 오탐 방지).
+pub fn render_with(md: &str, width: u16, theme: &Theme, team_keys: &[String]) -> Rendered {
     let md = sanitize(&md.nfc().collect::<String>());
     let mut r = Renderer::new(usize::from(width).max(10), *theme);
+    r.team_keys = team_keys.iter().map(|k| k.to_uppercase()).collect();
     let opts = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
     for ev in Parser::new_ext(&md, opts) {
         r.event(ev);
@@ -112,7 +118,8 @@ pub fn to_ansi(lines: &[Line<'_>]) -> String {
 static IDENTIFIER: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[A-Z][A-Z0-9]{0,9}-[0-9]+").expect("valid regex"));
 
-fn find_identifiers(s: &str) -> Vec<(usize, usize)> {
+/// `team_keys`가 비어 있지 않으면 그 키로 시작하는 식별자만 고른다.
+fn find_identifiers(s: &str, team_keys: &[String]) -> Vec<(usize, usize)> {
     IDENTIFIER
         .find_iter(s)
         .filter(|m| {
@@ -120,6 +127,12 @@ fn find_identifiers(s: &str) -> Vec<(usize, usize)> {
                 .chars()
                 .next_back()
                 .is_none_or(|c| !c.is_ascii_alphanumeric() && c != '-')
+        })
+        .filter(|m| {
+            team_keys.is_empty()
+                || m.as_str()
+                    .split_once('-')
+                    .is_some_and(|(key, _)| team_keys.iter().any(|k| k == key))
         })
         .map(|m| (m.start(), m.end()))
         .collect()
@@ -133,6 +146,10 @@ struct Table {
     row: Vec<String>,
     cell: Option<String>,
     header_rows: usize,
+    /// 셀 안 링크: (주소, 셀 텍스트에서 링크 글자가 시작하는 위치)
+    link: Option<(String, usize)>,
+    /// 셀 안 이미지: (주소, alt 텍스트)
+    image: Option<(String, String)>,
 }
 
 struct Renderer {
@@ -151,6 +168,8 @@ struct Renderer {
     image: Option<(String, String)>,
     table: Option<Table>,
     need_blank: bool,
+    /// 강조할 이슈 식별자의 팀 키 (비어 있으면 모두)
+    team_keys: Vec<String>,
 }
 
 impl Renderer {
@@ -170,6 +189,7 @@ impl Renderer {
             image: None,
             table: None,
             need_blank: false,
+            team_keys: Vec::new(),
         }
     }
 
@@ -218,7 +238,7 @@ impl Renderer {
             return;
         }
         let mut last = 0;
-        for (start, end) in find_identifiers(s) {
+        for (start, end) in find_identifiers(s, &self.team_keys) {
             self.push_seg(s[last..start].to_string(), style);
             self.push_seg(
                 s[start..end].to_string(),
@@ -237,37 +257,9 @@ impl Renderer {
     }
 
     fn event(&mut self, ev: Event<'_>) {
-        if let Some(t) = self.table.as_mut() {
-            match ev {
-                Event::Start(Tag::TableCell) => t.cell = Some(String::new()),
-                Event::End(TagEnd::TableCell) => {
-                    let c = t.cell.take().unwrap_or_default();
-                    t.row.push(c.trim().to_string());
-                }
-                Event::End(TagEnd::TableHead) => {
-                    let row = std::mem::take(&mut t.row);
-                    t.rows.push(row);
-                    t.header_rows = 1;
-                }
-                Event::End(TagEnd::TableRow) => {
-                    let row = std::mem::take(&mut t.row);
-                    t.rows.push(row);
-                }
-                Event::Text(s) | Event::Code(s) | Event::Html(s) | Event::InlineHtml(s) => {
-                    if let Some(c) = t.cell.as_mut() {
-                        c.push_str(&s);
-                    }
-                }
-                Event::SoftBreak | Event::HardBreak => {
-                    if let Some(c) = t.cell.as_mut() {
-                        c.push(' ');
-                    }
-                }
-                Event::End(TagEnd::Table) => {
-                    let t = self.table.take().unwrap_or_default();
-                    self.render_table(t);
-                }
-                _ => {}
+        if let Some(mut t) = self.table.take() {
+            if !self.table_event(&mut t, ev) {
+                self.table = Some(t);
             }
             return;
         }
@@ -426,13 +418,7 @@ impl Renderer {
                         .iter()
                         .map(|(s, _)| s.as_str())
                         .collect();
-                    let index = self.links.len() + 1;
-                    self.links.push(LinkTarget {
-                        index,
-                        kind: LinkKind::Link,
-                        url,
-                        label: label.trim().to_string(),
-                    });
+                    let index = self.add_link(url, label.trim().to_string());
                     let st = self.theme.dim;
                     self.push_seg(format!(" [{index}]"), st);
                 }
@@ -442,6 +428,25 @@ impl Renderer {
     }
 
     fn push_image(&mut self, url: String, alt: String) {
+        let text = self.add_image(url, alt);
+        let st = self.theme.dim;
+        self.push_seg(text, st);
+    }
+
+    /// 링크를 번호 목록에 넣고 번호를 돌려준다.
+    fn add_link(&mut self, url: String, label: String) -> usize {
+        let index = self.links.len() + 1;
+        self.links.push(LinkTarget {
+            index,
+            kind: LinkKind::Link,
+            url,
+            label,
+        });
+        index
+    }
+
+    /// 이미지를 번호 목록에 넣고 본문에 보일 자리 표시 문구를 돌려준다.
+    fn add_image(&mut self, url: String, alt: String) -> String {
         let index = self.links.len() + 1;
         let label = if alt.trim().is_empty() {
             file_name(&url)
@@ -454,8 +459,75 @@ impl Renderer {
             url,
             label: label.clone(),
         });
-        let st = self.theme.dim;
-        self.push_seg(format!("[이미지 {index}: {label}]"), st);
+        format!("[이미지 {index}: {label}]")
+    }
+
+    /// 표 안의 이벤트. 셀 텍스트를 모으고, 링크·이미지에도 번호를 매긴다. 표를 다 그렸으면 true.
+    fn table_event(&mut self, t: &mut Table, ev: Event<'_>) -> bool {
+        if let Some((_, alt)) = t.image.as_mut() {
+            match ev {
+                Event::Text(s) | Event::Code(s) => alt.push_str(&s),
+                Event::End(TagEnd::Image) => {
+                    if let Some((url, alt)) = t.image.take() {
+                        let text = self.add_image(url, alt);
+                        if let Some(c) = t.cell.as_mut() {
+                            c.push_str(&text);
+                        }
+                    }
+                }
+                _ => {}
+            }
+            return false;
+        }
+        match ev {
+            Event::Start(Tag::TableCell) => t.cell = Some(String::new()),
+            Event::End(TagEnd::TableCell) => {
+                let c = t.cell.take().unwrap_or_default();
+                t.row.push(c.trim().to_string());
+            }
+            Event::End(TagEnd::TableHead) => {
+                let row = std::mem::take(&mut t.row);
+                t.rows.push(row);
+                t.header_rows = 1;
+            }
+            Event::End(TagEnd::TableRow) => {
+                let row = std::mem::take(&mut t.row);
+                t.rows.push(row);
+            }
+            Event::Start(Tag::Link { dest_url, .. }) => {
+                let start = t.cell.as_ref().map_or(0, String::len);
+                t.link = Some((dest_url.to_string(), start));
+            }
+            Event::End(TagEnd::Link) => {
+                if let Some((url, start)) = t.link.take()
+                    && let Some(c) = t.cell.as_mut()
+                {
+                    let label = c.get(start..).unwrap_or("").trim().to_string();
+                    let index = self.add_link(url, label);
+                    c.push_str(&format!(" [{index}]"));
+                }
+            }
+            Event::Start(Tag::Image { dest_url, .. }) => {
+                t.image = Some((dest_url.to_string(), String::new()));
+            }
+            Event::Text(s) | Event::Code(s) | Event::Html(s) | Event::InlineHtml(s) => {
+                if let Some(c) = t.cell.as_mut() {
+                    c.push_str(&s);
+                }
+            }
+            Event::SoftBreak | Event::HardBreak => {
+                if let Some(c) = t.cell.as_mut() {
+                    c.push(' ');
+                }
+            }
+            Event::End(TagEnd::Table) => {
+                let table = std::mem::take(t);
+                self.render_table(table);
+                return true;
+            }
+            _ => {}
+        }
+        false
     }
 
     /// 목록·인용 접두사. (첫 줄, 이어지는 줄)
@@ -510,8 +582,15 @@ impl Renderer {
         for raw in code.trim_end_matches('\n').split('\n') {
             let text = raw.replace('\t', "    ");
             let segs = vec![(text, self.theme.code)];
-            self.out
-                .extend(wrap(&segs, &first, &rest, self.width, true));
+            for mut line in wrap(&segs, &first, &rest, self.width, true) {
+                // 코드 블록 배경을 폭 끝까지 칠한다
+                let w = line.width();
+                if w < self.width {
+                    line.spans
+                        .push(Span::styled(" ".repeat(self.width - w), self.theme.code));
+                }
+                self.out.push(line);
+            }
         }
         self.need_blank = true;
     }
@@ -772,12 +851,18 @@ mod tests {
 
     #[test]
     fn code_block_keeps_indent_and_hard_wraps() {
+        let trimmed = |md: &str| -> Vec<String> {
+            plain(md, 20)
+                .into_iter()
+                .map(|l| l.trim_end().to_string())
+                .collect()
+        };
         assert_eq!(
-            plain("```rust\nfn main() {}\n```", 20),
+            trimmed("```rust\nfn main() {}\n```"),
             vec!["  fn main() {}"]
         );
         assert_eq!(
-            plain("```\n0123456789012345678901234\n```", 20),
+            trimmed("```\n0123456789012345678901234\n```"),
             vec!["  012345678901234567", "  8901234"]
         );
     }
@@ -981,5 +1066,51 @@ mod tests {
         assert!(!has_control(&r.links[0].label), "{:?}", r.links[0].label);
         let text = to_plain(&r.lines);
         assert!(!has_control(&text), "{text:?}");
+    }
+
+    #[test]
+    fn code_block_background_fills_width() {
+        let theme = Theme::default();
+        let r = render("```\nx\n```", 20, &theme);
+        assert_eq!(r.lines[0].width(), 20);
+        assert!(r.lines[0].spans.iter().all(|s| s.style == theme.code));
+    }
+
+    #[test]
+    fn links_and_images_inside_tables_are_numbered() {
+        let r = render(
+            "| 문서 | 그림 |\n|---|---|\n| [가이드](https://x.dev/g) | ![](https://x.dev/a.png) |\n",
+            60,
+            &Theme::default(),
+        );
+        assert_eq!(r.links.len(), 2, "{:?}", r.links);
+        assert_eq!(r.links[0].url, "https://x.dev/g");
+        assert_eq!(r.links[0].label, "가이드");
+        assert_eq!(r.links[1].kind, LinkKind::Image);
+        let text = to_plain(&r.lines);
+        assert!(text.contains("가이드 [1]"), "{text}");
+        assert!(text.contains("[이미지 2: a.png]"), "{text}");
+    }
+
+    #[test]
+    fn identifier_highlight_can_be_limited_to_team_keys() {
+        let theme = Theme::default();
+        let highlighted = |r: &Rendered| -> Vec<String> {
+            r.lines[0]
+                .spans
+                .iter()
+                .filter(|s| s.style == theme.identifier)
+                .map(|s| s.content.to_string())
+                .collect()
+        };
+        let md = "UTF-8 문서와 ENG-12, SHA-256";
+        assert_eq!(
+            highlighted(&render(md, 80, &theme)),
+            vec!["UTF-8", "ENG-12", "SHA-256"]
+        );
+        assert_eq!(
+            highlighted(&render_with(md, 80, &theme, &["eng".to_string()])),
+            vec!["ENG-12"]
+        );
     }
 }

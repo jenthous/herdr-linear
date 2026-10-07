@@ -346,7 +346,8 @@ pub fn search(ctx: &Ctx, input: &str, deep: bool) -> Result<String> {
 
 pub fn show(ctx: &Ctx, id: &str) -> Result<String> {
     // 다른 워크스페이스의 이슈가 이전 캐시에 섞이지 않도록 먼저 워크스페이스를 맞춘다
-    load_viewer(ctx, false)?;
+    let viewer = load_viewer(ctx, false)?;
+    let keys = team_keys(viewer.as_ref());
     match queries::issue_detail(&ctx.client, id) {
         Ok(Some(d)) => {
             let removed = ctx
@@ -367,6 +368,7 @@ pub fn show(ctx: &Ctx, id: &str) -> Result<String> {
                 &d.comments,
                 d.more_comments,
                 None,
+                &keys,
             ))
         }
         Ok(None) => {
@@ -391,6 +393,7 @@ pub fn show(ctx: &Ctx, id: &str) -> Result<String> {
                 &comments,
                 false,
                 Some(&format!("오프라인: 저장된 내용 · {msg}")),
+                &keys,
             ))
         }
         Err(e) => Err(api_error(ctx, e)),
@@ -475,12 +478,20 @@ fn format_list(issues: &[Issue], banner: Option<&str>) -> String {
     out.join("\n")
 }
 
+/// 내 팀 키 목록 (식별자 강조용). viewer가 없으면 빈 목록.
+pub fn team_keys(viewer: Option<&Viewer>) -> Vec<String> {
+    viewer
+        .map(|v| v.teams.nodes.iter().map(|t| t.key.clone()).collect())
+        .unwrap_or_default()
+}
+
 fn format_detail(
     ctx: &Ctx,
     issue: &Issue,
     comments: &[Comment],
     more: bool,
     banner: Option<&str>,
+    team_keys: &[String],
 ) -> String {
     let theme = Theme::default();
     let mut out = Vec::new();
@@ -539,7 +550,7 @@ fn format_detail(
     if body.is_empty() {
         out.push("(본문 없음)".to_string());
     } else {
-        out.push(render_md(ctx, body, &theme));
+        out.push(render_md(ctx, body, &theme, team_keys));
     }
     if !comments.is_empty() {
         out.push(String::new());
@@ -559,7 +570,7 @@ fn format_detail(
                 "{who} · {}",
                 short_time(&c.created_at)
             )));
-            out.push(render_md(ctx, &c.body, &theme));
+            out.push(render_md(ctx, &c.body, &theme, team_keys));
         }
         if more {
             out.push(String::new());
@@ -569,8 +580,8 @@ fn format_detail(
     out.join("\n")
 }
 
-fn render_md(ctx: &Ctx, md: &str, theme: &Theme) -> String {
-    let r = markdown::render(md, ctx.width, theme);
+fn render_md(ctx: &Ctx, md: &str, theme: &Theme, team_keys: &[String]) -> String {
+    let r = markdown::render_with(md, ctx.width, theme, team_keys);
     let mut text = if ctx.color {
         markdown::to_ansi(&r.lines)
     } else {
