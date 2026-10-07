@@ -73,9 +73,22 @@ pub fn render(md: &str, width: u16, theme: &Theme) -> Rendered {
 
 /// `render`와 같되, `team_keys`가 있으면 그 팀 키의 식별자만 강조한다 (`UTF-8` 같은 오탐 방지).
 pub fn render_with(md: &str, width: u16, theme: &Theme, team_keys: &[String]) -> Rendered {
+    render_numbered(md, width, theme, team_keys, 1)
+}
+
+/// `render_with`와 같되 링크·이미지 번호를 `first`부터 매긴다.
+/// 상세 화면처럼 본문과 코멘트를 따로 그려도 번호를 이어 가게 할 때 쓴다.
+pub fn render_numbered(
+    md: &str,
+    width: u16,
+    theme: &Theme,
+    team_keys: &[String],
+    first: usize,
+) -> Rendered {
     let md = sanitize(&md.nfc().collect::<String>());
     let mut r = Renderer::new(usize::from(width).max(10), *theme);
     r.team_keys = team_keys.iter().map(|k| k.to_uppercase()).collect();
+    r.first_link = first.max(1);
     let opts = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
     for ev in Parser::new_ext(&md, opts) {
         r.event(ev);
@@ -182,6 +195,8 @@ struct Renderer {
     need_blank: bool,
     /// 강조할 이슈 식별자의 팀 키 (비어 있으면 모두)
     team_keys: Vec<String>,
+    /// 첫 링크·이미지 번호 (본문과 코멘트를 이어 매길 때 1보다 크다)
+    first_link: usize,
 }
 
 impl Renderer {
@@ -202,6 +217,7 @@ impl Renderer {
             table: None,
             need_blank: false,
             team_keys: Vec::new(),
+            first_link: 1,
         }
     }
 
@@ -447,7 +463,7 @@ impl Renderer {
 
     /// 링크를 번호 목록에 넣고 번호를 돌려준다.
     fn add_link(&mut self, url: String, label: String) -> usize {
-        let index = self.links.len() + 1;
+        let index = self.first_link + self.links.len();
         self.links.push(LinkTarget {
             index,
             kind: LinkKind::Link,
@@ -459,7 +475,7 @@ impl Renderer {
 
     /// 이미지를 번호 목록에 넣고 본문에 보일 자리 표시 문구를 돌려준다.
     fn add_image(&mut self, url: String, alt: String) -> String {
-        let index = self.links.len() + 1;
+        let index = self.first_link + self.links.len();
         let label = if alt.trim().is_empty() {
             file_name(&url)
         } else {
@@ -1123,6 +1139,24 @@ mod tests {
         assert_eq!(
             highlighted(&render_with(md, 80, &theme, &["eng".to_string()])),
             vec!["ENG-12"]
+        );
+    }
+
+    #[test]
+    fn link_numbers_can_start_later() {
+        let r = render_numbered(
+            "[a](https://a.dev) ![](https://b.dev/x.png)",
+            40,
+            &Theme::default(),
+            &[],
+            3,
+        );
+        let numbers: Vec<usize> = r.links.iter().map(|l| l.index).collect();
+        assert_eq!(numbers, vec![3, 4]);
+        let text = to_plain(&r.lines);
+        assert!(
+            text.contains("a [3]") && text.contains("[이미지 4: x.png]"),
+            "{text}"
         );
     }
 }

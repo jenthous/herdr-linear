@@ -7,7 +7,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
-use super::app::{App, Mode, Problem, Row, Tab};
+use super::app::{App, Detail, Mode, Problem, Row, Tab};
 use crate::linear::types::Issue;
 use crate::markdown::{self, Theme, sanitize};
 use crate::ui::row::issue_row;
@@ -349,8 +349,17 @@ fn draw_detail(f: &mut Frame, app: &App, area: Rect) -> u16 {
         width: area.width.saturating_sub(2),
         ..area
     };
+    let lines = detail_lines(d, area.width, &app.team_keys());
+    let total = u16::try_from(lines.len()).unwrap_or(u16::MAX);
+    let max = total.saturating_sub(area.height);
+    let scroll = d.scroll.min(max);
+    f.render_widget(Paragraph::new(lines).scroll((scroll, 0)), area);
+    max
+}
+
+/// 상세 화면의 줄. 링크·이미지 번호는 본문에서 코멘트로 이어 매긴다 (`u` 목록과 같은 번호).
+fn detail_lines(d: &Detail, width: u16, keys: &[String]) -> Vec<Line<'static>> {
     let theme = Theme::default();
-    let keys = app.team_keys();
     let mut lines: Vec<Line<'static>> = Vec::new();
     match &d.issue {
         None => {
@@ -368,7 +377,7 @@ fn draw_detail(f: &mut Frame, app: &App, area: Rect) -> u16 {
             lines.push(Line::from(Span::styled(text, style)));
         }
         Some(issue) => {
-            lines.extend(issue_header(issue, area.width));
+            lines.extend(issue_header(issue, width));
             lines.push(Line::from(Span::styled(issue.url.clone(), DIM)));
             if d.gone {
                 lines.push(Line::from(Span::styled(
@@ -377,9 +386,12 @@ fn draw_detail(f: &mut Frame, app: &App, area: Rect) -> u16 {
                 )));
             }
             lines.push(Line::default());
+            let mut next_link = 1;
             match issue.description.as_deref().map(str::trim) {
                 Some(body) if !body.is_empty() => {
-                    lines.extend(markdown::render_with(body, area.width, &theme, &keys).lines)
+                    let r = markdown::render_numbered(body, width, &theme, keys, next_link);
+                    next_link += r.links.len();
+                    lines.extend(r.lines);
                 }
                 _ => lines.push(Line::from(Span::styled("(본문 없음)", DIM))),
             }
@@ -403,7 +415,9 @@ fn draw_detail(f: &mut Frame, app: &App, area: Rect) -> u16 {
                         Span::styled(who, Style::new().add_modifier(Modifier::BOLD)),
                         Span::styled(format!(" · {}", local_time(&c.created_at)), DIM),
                     ]));
-                    lines.extend(markdown::render_with(&c.body, area.width, &theme, &keys).lines);
+                    let r = markdown::render_numbered(&c.body, width, &theme, keys, next_link);
+                    next_link += r.links.len();
+                    lines.extend(r.lines);
                 }
                 if d.more_comments {
                     lines.push(Line::default());
@@ -418,11 +432,7 @@ fn draw_detail(f: &mut Frame, app: &App, area: Rect) -> u16 {
             }
         }
     }
-    let total = u16::try_from(lines.len()).unwrap_or(u16::MAX);
-    let max = total.saturating_sub(area.height);
-    let scroll = d.scroll.min(max);
-    f.render_widget(Paragraph::new(lines).scroll((scroll, 0)), area);
-    max
+    lines
 }
 
 fn hints(mode: Mode) -> &'static str {
@@ -955,5 +965,78 @@ mod tests {
         let (rows, drawn, _) = screen(&a, 80, 12);
         assert_eq!(drawn.list_offset, Some(0));
         assert!(rows[2].contains("ENG-1"), "{rows:?}");
+    }
+
+    fn comment(id: &str, body: &str) -> crate::linear::types::Comment {
+        serde_json::from_value(serde_json::json!({
+            "id": id, "body": body, "createdAt": "2026-10-02T00:00:00.000Z",
+            "editedAt": null, "user": null
+        }))
+        .unwrap()
+    }
+
+    /// 첫 이슈(id "a")의 상세를 열고 서버 응답을 반영한다.
+    fn detail_of(issue: Issue, comments: Vec<crate::linear::types::Comment>) -> App {
+        let mut a = app();
+        a.handle(Input::Enter, T0);
+        a.apply(
+            Msg::Detail {
+                id: "a".into(),
+                issue,
+                comments,
+                more: false,
+                fresh: true,
+            },
+            T0,
+        );
+        a
+    }
+
+    fn link_menu(a: &mut App) -> Vec<String> {
+        a.handle(Input::Act(Act::Links), T0);
+        a.menu
+            .as_ref()
+            .unwrap()
+            .items
+            .iter()
+            .map(|(l, _)| l.clone())
+            .collect()
+    }
+
+    #[test]
+    fn comment_link_numbers_continue_from_the_body() {
+        let issue = IssueBuilder::new("a", "ENG-1", "로그인 버그")
+            .description("[문서](https://x.dev/doc)")
+            .build();
+        let mut a = detail_of(issue, vec![comment("c1", "[로그](https://x.dev/log)")]);
+        let text = markdown::to_plain(&detail_lines(a.detail.as_ref().unwrap(), 80, &[]));
+        assert!(
+            text.contains("문서 [1]") && text.contains("로그 [2]"),
+            "{text}"
+        );
+        assert_eq!(
+            link_menu(&mut a),
+            vec![
+                "[1] 문서 — https://x.dev/doc",
+                "[2] 로그 — https://x.dev/log"
+            ]
+        );
+    }
+
+    #[test]
+    fn links_in_comments_only_start_at_one() {
+        let issue = IssueBuilder::new("a", "ENG-1", "로그인 버그")
+            .description("  \n")
+            .build();
+        let mut a = detail_of(
+            issue,
+            vec![
+                comment("c1", "링크 없음"),
+                comment("c2", "![](https://x.dev/a.png)"),
+            ],
+        );
+        let text = markdown::to_plain(&detail_lines(a.detail.as_ref().unwrap(), 80, &[]));
+        assert!(text.contains("[이미지 1: a.png]"), "{text}");
+        assert_eq!(link_menu(&mut a), vec!["[1] a.png — https://x.dev/a.png"]);
     }
 }

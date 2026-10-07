@@ -680,27 +680,30 @@ impl App {
         });
     }
 
-    /// 상세 화면 본문과 코멘트의 링크·이미지 목록.
+    /// 상세 화면 본문과 코멘트의 링크·이미지 목록. 번호는 상세 화면에 보이는 번호와 같다.
     fn open_links(&mut self) {
         let Some(d) = self.detail.as_ref() else {
             return;
         };
-        let mut items = Vec::new();
+        // 상세 화면처럼 공백뿐인 본문은 빼고, 본문 → 코멘트 순서로 번호를 이어 매긴다
+        let body = d
+            .issue
+            .as_ref()
+            .and_then(|i| i.description.as_deref())
+            .map(str::trim)
+            .filter(|b| !b.is_empty());
         let theme = Theme::default();
-        let mut add = |md: &str| {
-            for l in markdown::render(md, 80, &theme).links {
-                let n = items.len() + 1;
+        let mut items = Vec::new();
+        for md in body
+            .into_iter()
+            .chain(d.comments.iter().map(|c| c.body.as_str()))
+        {
+            for l in markdown::render_numbered(md, 80, &theme, &[], items.len() + 1).links {
                 items.push((
-                    format!("[{n}] {} — {}", l.label, l.url),
+                    format!("[{}] {} — {}", l.index, l.label, l.url),
                     Act::OpenUrl(l.url),
                 ));
             }
-        };
-        if let Some(desc) = d.issue.as_ref().and_then(|i| i.description.as_deref()) {
-            add(desc);
-        }
-        for c in &d.comments {
-            add(&c.body);
         }
         self.menu = Some(Menu {
             title: if items.is_empty() {
