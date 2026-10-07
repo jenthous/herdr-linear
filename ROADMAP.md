@@ -16,6 +16,15 @@
 - Works offline from the cache. A small CLI ships too (`mine`, `search`, `show`).
 - Published on GitHub and listed in the herdr plugin marketplace
 
+## ✅ v0.1.1 — fixes from the v0.1 review
+
+- `q` closes the palette from the detail view too; Esc goes back
+- Link numbers in comments match the `u` link list
+- The list keeps its scroll position when you move back up
+- Rate limits show as a short notice instead of a status that stays on screen
+- Config warnings stay visible longer and also show on the key screen
+- CLI: piping output (`herdr-linear mine | head`) no longer crashes, `logout` clears the cache in both locations, and offline fallback no longer shows another workspace's cache right after a key change
+
 ## 🔜 v0.2 — side panel and actions (next)
 
 - **Side panel**: one key (`prefix+shift+i`) opens or closes a Linear pane to the right of your work. It starts in list mode and refreshes on its own, every 60 seconds by default.
@@ -24,7 +33,7 @@
   - A template is filled with the issue's title, link, state, labels, description, and recent comments.
   - You can edit it before sending.
   - It is pasted into the agent's pane.
-- **Polish from the v0.1 review**: key-change handling, link numbers in comments, redraw cost, and other small fixes
+- **Polish from the v0.1 review**: key-change handling, redraw cost, and other small fixes
 
 ## Later
 
@@ -65,6 +74,15 @@
 - 캐시로 오프라인에서도 봐요. CLI도 함께 있어요(`mine`, `search`, `show`).
 - GitHub에 공개하고 herdr 플러그인 마켓플레이스에 올렸어요.
 
+## ✅ v0.1.1 — v0.1 리뷰 수정
+
+- 상세 화면에서도 `q`로 닫아요. Esc는 뒤로예요.
+- 코멘트 안 링크 번호가 `u` 링크 목록 번호와 같아요.
+- 목록을 위로 올릴 때 스크롤 위치가 그대로예요.
+- 한도를 넘으면 상단에 남기지 않고 잠깐 알려요.
+- 설정 경고가 더 오래 보이고 키 입력 화면에도 보여요.
+- CLI: 출력을 파이프로 넘겨도(`herdr-linear mine | head`) 오류로 멈추지 않아요. `logout`은 두 위치의 캐시를 모두 지워요. 키를 바꾼 직후 오프라인이면 다른 워크스페이스 캐시를 보이지 않아요.
+
 ## 🔜 v0.2 — 사이드 패널과 변경 동작 (다음)
 
 - **사이드 패널**: 키 하나(`prefix+shift+i`)로 작업 오른쪽에 Linear pane을 열고 닫아요. 목록 모드로 시작하고 스스로 새로고침해요(기본 60초마다).
@@ -73,7 +91,7 @@
   - 이슈의 제목·링크·상태·라벨·본문·최근 코멘트로 템플릿을 채워요.
   - 보내기 전에 고칠 수 있어요.
   - 에이전트 pane에 붙여 넣어요.
-- **v0.1 리뷰에서 미룬 손질**: 키를 바꿀 때 상태 정리, 코멘트 링크 번호, 다시 그리는 비용 등 작은 수정
+- **v0.1 리뷰에서 미룬 손질**: 키를 바꿀 때 상태 정리, 다시 그리는 비용 등 작은 수정
 
 ## 나중에
 

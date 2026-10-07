@@ -61,7 +61,7 @@ Create a key in Linear → Settings → Security & access → Personal API keys.
 |---|---|
 | Search (default) | type to search, ↑/↓ or Ctrl+P/N to move, Enter to open, Tab/Shift+Tab to switch tabs, Ctrl+K for the action menu, Esc for list mode |
 | List | j/k to move, g/G for top/bottom, `/` to search, Enter to open, `y` copy issue URL, `Y` copy open PR link, `r` refresh, `o` open in browser, `q`/Esc to close |
-| Detail | j/k to scroll, Ctrl+D/U for half a page, g/G for top/bottom, `u` for links, `y` `Y` `o` `r`, Esc to go back |
+| Detail | j/k to scroll, Ctrl+D/U for half a page, g/G for top/bottom, `u` for links, `y` `Y` `o` `r`, Esc to go back, `q` to close |
 
 - Copy the issue ID from the Ctrl+K menu. URL copy is at the top of that menu.
 - Ctrl combinations work with any input method. In list and detail modes, Korean jamo keys act as the same Latin keys (ㅓ→j, ㅏ→k, …).
@@ -116,7 +116,7 @@ herdr-linear show ENG-123
 
 - **The palette doesn't open**: herdr refuses popups while its settings, copy mode, or another modal is open. Close it and try again.
 - **"오프라인" (offline)**: cached data is shown. It retries on the next lookup.
-- **"한도 초과" (rate limited)**: it retries after the time shown. Local search keeps working.
+- **"한도를 넘었어요" (rate limited)**: a short notice at the bottom says when to try again. Automatic server search waits until then; local search keeps working.
 - Errors are written to `herdr-linear.log`.
 
 ## Development
@@ -190,7 +190,7 @@ Linear → Settings → Security & access → Personal API keys에서 키를 만
 |---|---|
 | 검색 (기본) | 글자 = 검색어, ↑/↓·Ctrl+P/N = 이동, Enter = 상세, Tab/Shift+Tab = 탭, Ctrl+K = 동작 메뉴, Esc = 목록 모드 |
 | 목록 | j/k = 이동, g/G = 처음/끝, `/` = 검색, Enter = 상세, `y` = 티켓 URL 복사, `Y` = 열린 PR 링크 복사, `r` = 새로고침, `o` = 브라우저, `q`·Esc = 닫기 |
-| 상세 | j/k = 스크롤, Ctrl+D/U = 반 페이지, g/G = 처음/끝, `u` = 링크 목록, `y`·`Y`·`o`·`r`, Esc = 뒤로 |
+| 상세 | j/k = 스크롤, Ctrl+D/U = 반 페이지, g/G = 처음/끝, `u` = 링크 목록, `y`·`Y`·`o`·`r`, Esc = 뒤로, `q` = 닫기 |
 
 - ID 복사는 Ctrl+K 메뉴에 있어요. 메뉴 맨 위는 URL 복사예요.
 - Ctrl 조합은 한글 입력 중에도 동작해요. 목록·상세에서는 한글 자모 키도 같은 영문 키로 받아요(ㅓ→j, ㅏ→k 등).
@@ -243,7 +243,7 @@ herdr-linear show ENG-123
 
 - **팔레트가 안 열려요**: herdr 설정 화면이나 복사 모드가 떠 있으면 팝업을 열 수 없어요. 닫고 다시 눌러요.
 - **"오프라인"**: 저장된 내용으로 계속 보여 주고, 다음 조회 때 다시 시도해요.
-- **"한도 초과"**: 표시된 시간이 지나면 다시 찾아요. 그동안 캐시 검색은 계속 돼요.
+- **"한도를 넘었어요"**: 아래에 잠깐 뜨는 안내에 언제 다시 시도할지 나와요. 그때까지 자동 서버 검색은 멈추고, 캐시 검색은 계속 돼요.
 - 자세한 오류는 `herdr-linear.log`에 남아요.
 
 ## 개발
