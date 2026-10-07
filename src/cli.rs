@@ -9,7 +9,7 @@ use crate::config::{self, KeySource, Paths, Settings};
 use crate::linear::client::{ApiError, LinearClient};
 use crate::linear::filter::{build_issue_filter, token_filter};
 use crate::linear::queries;
-use crate::linear::types::{Comment, Issue, Viewer};
+use crate::linear::types::{Comment, Issue, TeamRef, Viewer};
 use crate::markdown::{self, Theme};
 use crate::search::query::parse;
 use crate::search::rank::{SearchIndex, merge, sort_mine};
@@ -18,7 +18,8 @@ use crate::ui::row::issue_row;
 use crate::ui::style::local_time;
 pub use crate::ui::style::{ago, priority_label, state_icon};
 
-const VIEWER_TTL_MS: i64 = 60 * 60 * 1000;
+/// 내 정보(viewer)를 다시 받는 간격.
+pub const VIEWER_TTL_MS: i64 = 60 * 60 * 1000;
 const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 const SEARCH_LIMIT: usize = 30;
 
@@ -192,7 +193,8 @@ pub fn logout(paths: &Paths, fallbacks: &[std::path::PathBuf]) -> Result<String>
     Ok("API 키와 캐시를 지웠어요".to_string())
 }
 
-fn save_viewer(store: &Store, v: &Viewer, now: i64, key_fp: &str) -> Result<()> {
+/// viewer를 저장한다. 워크스페이스가 바뀌었으면 캐시를 먼저 비운다.
+pub fn save_viewer(store: &Store, v: &Viewer, now: i64, key_fp: &str) -> Result<()> {
     store.ensure_org(&v.organization.id)?;
     store.meta_set("viewer", &serde_json::to_string(v)?)?;
     store.meta_set("viewer_at", &now.to_string())?;
@@ -205,17 +207,7 @@ fn save_viewer(store: &Store, v: &Viewer, now: i64, key_fp: &str) -> Result<()> 
 /// 오프라인이면 같은 키로 받은 오래된 캐시라도 쓰고, 그것도 없으면 `None`.
 pub fn load_viewer(ctx: &Ctx, force: bool) -> Result<Option<Viewer>> {
     let key_fp = ctx.client.key_fingerprint();
-    let same_key = ctx.store.meta_get("viewer_key")?.as_deref() == Some(key_fp.as_str());
-    let cached: Option<(Viewer, i64)> = match (
-        same_key,
-        ctx.store.meta_get("viewer")?,
-        ctx.store.meta_get("viewer_at")?,
-    ) {
-        (true, Some(v), Some(at)) => serde_json::from_str(&v)
-            .ok()
-            .map(|v| (v, at.parse().unwrap_or(0))),
-        _ => None,
-    };
+    let cached = cached_viewer(&ctx.store, &key_fp)?;
     if !force
         && let Some((v, at)) = &cached
         && ctx.now_ms - at < VIEWER_TTL_MS
@@ -232,8 +224,23 @@ pub fn load_viewer(ctx: &Ctx, force: bool) -> Result<Option<Viewer>> {
     }
 }
 
-/// 검색 범위 팀 id. config의 `teams`가 비어 있으면 내가 속한 팀 전부.
-pub fn scope_team_ids(viewer: &Viewer, settings: &Settings) -> Vec<String> {
+/// 같은 키(지문)로 저장된 viewer와 저장 시각. 다른 키로 받은 것은 쓰지 않는다.
+pub fn cached_viewer(store: &Store, key_fp: &str) -> Result<Option<(Viewer, i64)>> {
+    if store.meta_get("viewer_key")?.as_deref() != Some(key_fp) {
+        return Ok(None);
+    }
+    Ok(
+        match (store.meta_get("viewer")?, store.meta_get("viewer_at")?) {
+            (Some(v), Some(at)) => serde_json::from_str(&v)
+                .ok()
+                .map(|v| (v, at.parse().unwrap_or(0))),
+            _ => None,
+        },
+    )
+}
+
+/// 검색 범위 팀. config의 `teams`가 비어 있으면 내가 속한 팀 전부.
+pub fn scope_teams<'a>(viewer: &'a Viewer, settings: &Settings) -> Vec<&'a TeamRef> {
     viewer
         .teams
         .nodes
@@ -245,6 +252,13 @@ pub fn scope_team_ids(viewer: &Viewer, settings: &Settings) -> Vec<String> {
                     .iter()
                     .any(|k| k.eq_ignore_ascii_case(&t.key))
         })
+        .collect()
+}
+
+/// 검색 범위 팀 id.
+pub fn scope_team_ids(viewer: &Viewer, settings: &Settings) -> Vec<String> {
+    scope_teams(viewer, settings)
+        .into_iter()
         .map(|t| t.id.clone())
         .collect()
 }

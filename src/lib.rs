@@ -4,6 +4,7 @@ pub mod cli;
 pub mod config;
 pub mod context;
 pub mod linear;
+pub mod log;
 pub mod markdown;
 pub mod search;
 pub mod store;

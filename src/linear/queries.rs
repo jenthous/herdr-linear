@@ -40,13 +40,17 @@ pub fn my_issues(c: &LinearClient) -> Result<Vec<Issue>, ApiError> {
     Ok(issues_page(c, &filter, None)?.nodes)
 }
 
-/// 범위 팀의 이슈를 최근 수정 순으로 한 페이지씩.
+/// 범위 팀의 이슈를 최근 수정 순으로 한 페이지씩. 팀 목록이 비어 있으면 모든 팀.
 pub fn team_issues(
     c: &LinearClient,
     team_ids: &[String],
     after: Option<&str>,
 ) -> Result<IssuePage, ApiError> {
-    let filter = json!({ "team": { "id": { "in": team_ids } } });
+    let filter = if team_ids.is_empty() {
+        json!({})
+    } else {
+        json!({ "team": { "id": { "in": team_ids } } })
+    };
     issues_page(c, &filter, after)
 }
 
@@ -298,5 +302,21 @@ mod tests {
             .with_body(r#"{"data":{"issueVcsBranchSearch":null}}"#)
             .create();
         assert_eq!(branch_issue(&client(&server), "main").unwrap(), None);
+    }
+
+    #[test]
+    fn team_issues_without_scope_searches_all_teams() {
+        let mut server = mockito::Server::new();
+        let m = server
+            .mock("POST", "/graphql")
+            // 빈 객체는 부분 일치로는 무엇이든 맞으므로 본문 문자열로 확인한다 (ureq는 들여쓰기해서 보낸다)
+            .match_body(Matcher::Regex(r#""filter":\s*\{\s*\}"#.into()))
+            .with_body(
+                json!({ "data": { "issues": { "nodes": [], "pageInfo": { "hasNextPage": false, "endCursor": null } } } })
+                    .to_string(),
+            )
+            .create();
+        team_issues(&client(&server), &[], None).unwrap();
+        m.assert();
     }
 }
