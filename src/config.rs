@@ -218,6 +218,27 @@ pub fn default_credential_fallbacks() -> Vec<PathBuf> {
         .unwrap_or_default()
 }
 
+/// CLI(`~/.local/state/herdr-linear`)와 herdr 플러그인(`~/.local/state/herdr/plugins/jh.linear`)의
+/// 캐시 위치. `logout`은 키처럼 두 곳의 캐시를 모두 지운다.
+pub fn cache_fallbacks(home: &Path) -> Vec<PathBuf> {
+    let state = home.join(".local").join("state");
+    vec![
+        state.join(APP_NAME).join("cache.db"),
+        state
+            .join("herdr")
+            .join("plugins")
+            .join(PLUGIN_ID)
+            .join("cache.db"),
+    ]
+}
+
+/// 실제 HOME 기준 캐시 위치. 테스트에서는 쓰지 말고 임시 경로를 넘긴다.
+pub fn default_cache_fallbacks() -> Vec<PathBuf> {
+    std::env::var_os("HOME")
+        .map(|h| cache_fallbacks(Path::new(&h)))
+        .unwrap_or_default()
+}
+
 /// 키를 찾는다. 순서: `LINEAR_API_KEY` 환경 변수 → credentials 파일 → `fallbacks`.
 pub fn resolve_api_key(
     env_value: Option<String>,
@@ -573,6 +594,17 @@ mod tests {
             vec![
                 PathBuf::from("/home/me/.config/herdr-linear/credentials"),
                 PathBuf::from("/home/me/.config/herdr/plugins/config/jh.linear/credentials"),
+            ]
+        );
+    }
+
+    #[test]
+    fn cache_locations_cover_cli_and_plugin() {
+        assert_eq!(
+            cache_fallbacks(Path::new("/home/me")),
+            vec![
+                PathBuf::from("/home/me/.local/state/herdr-linear/cache.db"),
+                PathBuf::from("/home/me/.local/state/herdr/plugins/jh.linear/cache.db"),
             ]
         );
     }

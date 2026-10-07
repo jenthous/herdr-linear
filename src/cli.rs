@@ -1,6 +1,7 @@
 //! 명령: login, logout, whoami, mine, search, show와 herdr용 open, ui.
 
 use std::io::IsTerminal;
+use std::path::PathBuf;
 
 use anyhow::{Result, anyhow, bail};
 use clap::{Parser, Subcommand};
@@ -146,7 +147,11 @@ pub fn run(cli: Cli) -> Result<String> {
     match cli.command {
         Command::Login => return login(&paths),
         Command::Logout => {
-            let out = logout(&paths, &config::default_credential_fallbacks())?;
+            let out = logout(
+                &paths,
+                &config::default_credential_fallbacks(),
+                &config::default_cache_fallbacks(),
+            )?;
             // herdr 액션으로 실행되면 출력이 보이지 않으니 알림으로 알린다
             if std::env::var_os("HERDR_PLUGIN_ACTION_ID").is_some() {
                 let _ = Herdr::from_env().notify("Linear", &out);
@@ -244,10 +249,14 @@ pub fn open_store(paths: &Paths, settings: &Settings, now: i64) -> Result<Store>
     Ok(store)
 }
 
-/// 키(보조 위치 포함)와 캐시를 지운다. `fallbacks`는 실제 실행에서만 HOME 기준 위치를 넘긴다.
-pub fn logout(paths: &Paths, fallbacks: &[std::path::PathBuf]) -> Result<String> {
-    config::delete_credentials(paths, fallbacks)?;
+/// 키와 캐시를 지운다. CLI와 플러그인은 위치가 달라서 `credentials`·`caches`로 다른 위치도 함께 지운다.
+/// 다른 위치는 실제 실행에서만 HOME 기준으로 넘긴다.
+pub fn logout(paths: &Paths, credentials: &[PathBuf], caches: &[PathBuf]) -> Result<String> {
+    config::delete_credentials(paths, credentials)?;
     remove_db_files(&paths.cache_db());
+    for db in caches {
+        remove_db_files(db);
+    }
     Ok("API 키와 캐시를 지웠어요".to_string())
 }
 
@@ -1015,12 +1024,16 @@ mod tests {
 
     #[test]
     fn logout_removes_key_and_cache() {
-        let (_d, ctx) = test_ctx(OFFLINE.into());
+        let (d, ctx) = test_ctx(OFFLINE.into());
         config::save_api_key(&ctx.paths, "lin_api_x").unwrap();
         Store::open(&ctx.paths.cache_db()).unwrap();
-        logout(&ctx.paths, &[]).unwrap();
+        // 다른 위치(CLI ↔ 플러그인)의 캐시
+        let other = d.path().join("other").join("cache.db");
+        Store::open(&other).unwrap();
+        logout(&ctx.paths, &[], std::slice::from_ref(&other)).unwrap();
         assert!(!ctx.paths.credentials_file().exists());
         assert!(!ctx.paths.cache_db().exists());
+        assert!(!other.exists());
     }
 
     #[test]
