@@ -46,6 +46,8 @@ pub struct Drawn {
     pub detail_max_scroll: Option<u16>,
     /// 누를 수 있는 곳. 나중에 그린 것(메뉴)이 뒤에 온다
     pub hits: Vec<Hit>,
+    /// 목록을 그렸으면 그 스크롤 위치 (다음 프레임에 이어 쓴다)
+    pub list_offset: Option<usize>,
 }
 
 impl Drawn {
@@ -83,10 +85,10 @@ pub fn draw(f: &mut Frame, app: &App, now: i64) -> Drawn {
             let [list, preview] =
                 Layout::horizontal([Constraint::Percentage(45), Constraint::Percentage(55)])
                     .areas(body);
-            drawn.hits.extend(draw_list(f, app, list));
+            draw_list(f, app, list, &mut drawn);
             draw_preview(f, app, preview);
         } else {
-            drawn.hits.extend(draw_list(f, app, body));
+            draw_list(f, app, body, &mut drawn);
         }
     }
     draw_footer(f, app, footer, now);
@@ -164,8 +166,8 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Paragraph::new(line), area);
 }
 
-/// 목록 줄의 위치를 함께 돌려준다 (마우스로 선택·열기).
-fn draw_list(f: &mut Frame, app: &App, area: Rect) -> Vec<Hit> {
+/// 목록을 그리고, 줄의 위치(마우스로 선택·열기)와 스크롤 위치를 `drawn`에 남긴다.
+fn draw_list(f: &mut Frame, app: &App, area: Rect, drawn: &mut Drawn) {
     if app.rows.is_empty() {
         let text = if app.loading > 0 {
             "불러오는 중…"
@@ -173,7 +175,7 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect) -> Vec<Hit> {
             "결과가 없어요"
         };
         f.render_widget(Paragraph::new(Span::styled(format!("  {text}"), DIM)), area);
-        return Vec::new();
+        return;
     }
     let width = area.width.saturating_sub(2);
     let mut items = Vec::new();
@@ -205,21 +207,24 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect) -> Vec<Hit> {
         items.push(ListItem::new(Line::from(spans)));
         item_rows.push(Some(i));
     }
-    let mut state = ListState::default().with_selected(Some(selected_item));
+    // 항목은 모두 한 줄이라, 칸을 다 채울 수 있는 만큼만 이전 스크롤 위치를 이어 쓴다
+    let max_offset = items.len().saturating_sub(usize::from(area.height));
+    let mut state = ListState::default()
+        .with_offset(app.list_offset.min(max_offset))
+        .with_selected(Some(selected_item));
     f.render_stateful_widget(
         List::new(items).highlight_style(SELECTED_BG),
         area,
         &mut state,
     );
-    (0..area.height)
-        .filter_map(|k| {
-            let row = (*item_rows.get(state.offset() + usize::from(k))?)?;
-            Some(Hit {
-                area: Rect::new(area.x, area.y + k, area.width, 1),
-                target: Target::Row(row),
-            })
+    drawn.list_offset = Some(state.offset());
+    drawn.hits.extend((0..area.height).filter_map(|k| {
+        let row = (*item_rows.get(state.offset() + usize::from(k))?)?;
+        Some(Hit {
+            area: Rect::new(area.x, area.y + k, area.width, 1),
+            target: Target::Row(row),
         })
-        .collect()
+    }));
 }
 
 /// 이슈 머리: 식별자·제목 / 상태·우선순위·담당자 / 라벨·프로젝트·사이클·상위·예상·마감.
@@ -882,5 +887,73 @@ mod tests {
         let (rows, _, _) = screen(&a, 80, 12);
         assert_eq!(rows[11], " 복사됨: ENG-1");
         a.handle(Input::Act(Act::Back), T0);
+    }
+
+    fn numbered(n: usize) -> Vec<Issue> {
+        (1..=n)
+            .map(|k| {
+                IssueBuilder::new(&format!("i{k}"), &format!("ENG-{k}"), &format!("이슈 {k}"))
+                    .build()
+            })
+            .collect()
+    }
+
+    /// 이슈 20개. 80×12 화면이면 목록은 셋째 줄부터 9줄이다.
+    fn twenty() -> App {
+        let (mut a, _) = App::start(None);
+        a.apply(
+            Msg::Tab {
+                tab: Tab::Mine,
+                issues: numbered(20),
+                fresh: true,
+                has_more: false,
+                append: false,
+            },
+            T0,
+        );
+        a
+    }
+
+    /// 한 프레임을 그리고 스크롤 위치를 넘겨준 뒤, 선택 표시(▶)가 있는 화면 줄을 돌려준다.
+    fn frame(a: &mut App) -> usize {
+        let (rows, drawn, _) = screen(a, 80, 12);
+        if let Some(offset) = drawn.list_offset {
+            a.list_offset = offset;
+        }
+        rows.iter()
+            .position(|r| r.starts_with('▶'))
+            .expect("선택 줄")
+    }
+
+    #[test]
+    fn list_keeps_its_scroll_position_when_moving_back_up() {
+        let mut a = twenty();
+        for _ in 0..12 {
+            a.handle(Input::Down, T0);
+            frame(&mut a);
+        }
+        assert_eq!(frame(&mut a), 10, "맨 아래 줄");
+        a.handle(Input::Up, T0);
+        assert_eq!(frame(&mut a), 9, "한 줄 올라간다 (아래에 붙지 않는다)");
+    }
+
+    #[test]
+    fn shorter_list_after_scrolling_starts_from_the_top() {
+        let mut a = twenty();
+        a.list_offset = 10;
+        a.selected = 15;
+        a.apply(
+            Msg::Tab {
+                tab: Tab::Mine,
+                issues: numbered(3),
+                fresh: true,
+                has_more: false,
+                append: false,
+            },
+            T0,
+        );
+        let (rows, drawn, _) = screen(&a, 80, 12);
+        assert_eq!(drawn.list_offset, Some(0));
+        assert!(rows[2].contains("ENG-1"), "{rows:?}");
     }
 }

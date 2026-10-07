@@ -752,6 +752,9 @@ fn event_loop(
             if let Some(max) = d.detail_max_scroll {
                 app.set_detail_max_scroll(max);
             }
+            if let Some(offset) = d.list_offset {
+                app.list_offset = offset;
+            }
             last = d;
         }
         if event::poll(Duration::from_millis(50))? {

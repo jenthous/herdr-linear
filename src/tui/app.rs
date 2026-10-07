@@ -264,6 +264,8 @@ pub struct App {
     pub query: String,
     pub rows: Vec<Row>,
     pub selected: usize,
+    /// 목록의 스크롤 위치. 런타임이 그린 결과(`Drawn::list_offset`)를 넣어 준다
+    pub list_offset: usize,
     pub detail: Option<Detail>,
     pub menu: Option<Menu>,
     pub key_input: String,
@@ -297,6 +299,7 @@ impl App {
             query: String::new(),
             rows: Vec::new(),
             selected: 0,
+            list_offset: 0,
             detail: None,
             menu: None,
             key_input: String::new(),
