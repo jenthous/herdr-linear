@@ -229,18 +229,19 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect, drawn: &mut Drawn) {
 
 /// 이슈 머리: 식별자·제목 / 상태·우선순위·담당자 / 라벨·프로젝트·사이클·상위·예상·마감.
 pub fn issue_header(issue: &Issue, width: u16) -> Vec<Line<'static>> {
+    let ident = sanitize(&issue.identifier);
     let mut lines = markdown::wrap_text(
-        &format!("{}  {}", issue.identifier, issue.title),
+        &format!("{ident}  {}", issue.title),
         width,
         Style::new().add_modifier(Modifier::BOLD),
     );
     if let Some(first) = lines.first_mut()
         && let Some(span) = first.spans.first_mut()
-        && span.content.starts_with(issue.identifier.as_str())
+        && span.content.starts_with(ident.as_str())
     {
         // 식별자만 강조색으로
-        let rest = span.content[issue.identifier.len()..].to_string();
-        let id = Span::styled(issue.identifier.clone(), ACCENT);
+        let rest = span.content[ident.len()..].to_string();
+        let id = Span::styled(ident.clone(), ACCENT);
         *span = Span::styled(rest, span.style);
         first.spans.insert(0, id);
     }
@@ -298,7 +299,7 @@ pub fn issue_header(issue: &Issue, width: u16) -> Vec<Line<'static>> {
         info.push(format!("사이클 {}", sanitize(&name)));
     }
     if let Some(p) = &issue.parent {
-        info.push(format!("상위 {}", p.identifier));
+        info.push(format!("상위 {}", sanitize(&p.identifier)));
     }
     if let Some(e) = issue.estimate {
         info.push(format!("예상 {e}"));
@@ -378,7 +379,7 @@ fn detail_lines(d: &Detail, width: u16, keys: &[String]) -> Vec<Line<'static>> {
         }
         Some(issue) => {
             lines.extend(issue_header(issue, width));
-            lines.push(Line::from(Span::styled(issue.url.clone(), DIM)));
+            lines.push(Line::from(Span::styled(sanitize(&issue.url), DIM)));
             if d.gone {
                 lines.push(Line::from(Span::styled(
                     "보관되었거나 삭제된 이슈예요",
@@ -1038,5 +1039,24 @@ mod tests {
         let text = markdown::to_plain(&detail_lines(a.detail.as_ref().unwrap(), 80, &[]));
         assert!(text.contains("[이미지 1: a.png]"), "{text}");
         assert_eq!(link_menu(&mut a), vec!["[1] a.png — https://x.dev/a.png"]);
+    }
+
+    #[test]
+    fn ids_and_url_are_stripped_of_control_characters() {
+        let mut v = IssueBuilder::new("a", "ENG-1", "로그인 버그").json();
+        v["identifier"] = serde_json::json!("ENG-1\u{1b}[2J");
+        v["url"] = serde_json::json!("https://linear.app/x\u{1b}]52;c;eA==\u{7}");
+        v["parent"] =
+            serde_json::json!({ "id": "p", "identifier": "ENG-0\u{1b}[5m", "title": "상위" });
+        let issue: Issue = serde_json::from_value(v).unwrap();
+        let clean = |lines: &[Line<'_>]| {
+            lines
+                .iter()
+                .flat_map(|l| l.spans.iter())
+                .all(|s| !s.content.chars().any(char::is_control))
+        };
+        assert!(clean(&issue_header(&issue, 80)));
+        let a = detail_of(issue, Vec::new());
+        assert!(clean(&detail_lines(a.detail.as_ref().unwrap(), 80, &[])));
     }
 }

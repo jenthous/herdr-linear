@@ -133,7 +133,8 @@ pub fn to_ansi(lines: &[Line<'_>]) -> String {
         }
         for span in &line.spans {
             let cs: ContentStyle = span.style.into_crossterm();
-            out.push_str(&StyledContent::new(cs, span.content.as_ref()).to_string());
+            // 색(ESC [ … m)은 여기서 붙인다. 내용에는 제어 문자가 남지 않게 한 번 더 거른다
+            out.push_str(&StyledContent::new(cs, sanitize(&span.content)).to_string());
         }
     }
     out
@@ -1158,5 +1159,19 @@ mod tests {
             text.contains("a [3]") && text.contains("[이미지 4: x.png]"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn ansi_output_never_carries_control_characters_from_content() {
+        let line = Line::from(Span::styled(
+            "a\u{1b}]52;c;eA==\u{7}b",
+            Style::new().fg(Color::Red),
+        ));
+        let out = to_ansi(&[line]);
+        assert!(
+            !out.contains("\u{1b}]") && !out.contains('\u{7}'),
+            "{out:?}"
+        );
+        assert!(out.contains("a]52;c;eA==b"), "{out:?}");
     }
 }

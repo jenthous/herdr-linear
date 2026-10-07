@@ -17,7 +17,7 @@ pub fn issue_row(issue: &Issue, width: u16) -> Line<'static> {
         format!("{} ", state_icon(&issue.state.state_type)),
         state_style(&issue.state),
     );
-    let id = Span::styled(format!("{:<9} ", issue.identifier), DIM);
+    let id = Span::styled(format!("{:<9} ", sanitize(&issue.identifier)), DIM);
     let fixed = icon.width() + id.width();
     let mut tail: Vec<Span<'static>> = Vec::new();
     for (i, label) in issue.labels.nodes.iter().enumerate() {
@@ -83,5 +83,10 @@ mod tests {
         let i = IssueBuilder::new("i1", "UP-1", "제목\u{1b}[2J").build();
         let text = to_plain(&[issue_row(&i, 80)]);
         assert!(!text.contains('\u{1b}'), "{text:?}");
+        let mut v = IssueBuilder::new("i2", "UP-2", "제목").json();
+        v["identifier"] = serde_json::json!("UP-2\u{1b}]0;x\u{7}");
+        let i: Issue = serde_json::from_value(v).unwrap();
+        let text = to_plain(&[issue_row(&i, 80)]);
+        assert!(!text.chars().any(char::is_control), "{text:?}");
     }
 }
