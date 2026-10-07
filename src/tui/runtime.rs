@@ -706,8 +706,9 @@ fn find_branch_issue(
     branch: &str,
     ident: Option<&str>,
 ) -> Result<Option<Issue>, ApiError> {
+    // 이슈만 쓰니 관계는 받지 않는다
     if let Some(ident) = ident
-        && let Some(d) = queries::issue_detail(c, ident)?
+        && let Some(d) = queries::issue_detail_without_relations(c, ident)?
         && !d.issue.is_gone()
     {
         return Ok(Some(d.issue));
@@ -1272,6 +1273,39 @@ mod tests {
         let again = settle(&mut fx.rt, T0 + 60_000);
         assert!(matches!(&again[..], [Msg::Pinned(Some(i))] if i.identifier == "ENG-9"));
         m.assert();
+    }
+
+    #[test]
+    fn pinned_issue_lookup_by_identifier_does_not_ask_for_relations() {
+        let repo = git_repo("me/eng-5-login");
+        let mut fx = fixture(Some(KeySource::File), true, origin_at(repo.path()));
+        // 브랜치 이슈 찾기는 이슈만 쓴다. 관계를 달라는 요청은 가면 안 된다
+        let relation_request = fx
+            .server
+            .mock("POST", "/graphql")
+            .match_body(Matcher::Regex("inverseRelations".into()))
+            .with_body(r#"{"errors":[{"message":"관계는 필요 없어요"}]}"#)
+            .expect(0)
+            .create();
+        let mut detail = IssueBuilder::new("e5", "ENG-5", "로그인").json();
+        detail["comments"] =
+            json!({ "nodes": [], "pageInfo": { "hasNextPage": false, "endCursor": null } });
+        let plain_request = fx
+            .server
+            .mock("POST", "/graphql")
+            .match_body(Matcher::Regex(r"endCursor \} \} \} \}".into()))
+            .with_body(json!({ "data": { "issue": detail } }).to_string())
+            .expect(1)
+            .create();
+        fx.rt.execute(Effect::Init, T0);
+        assert!(fx.rt.execute(Effect::ResolvePinned, T0).is_empty());
+        let msgs = settle(&mut fx.rt, T0);
+        assert!(
+            matches!(&msgs[..], [Msg::Pinned(Some(i))] if i.identifier == "ENG-5"),
+            "{msgs:?}"
+        );
+        plain_request.assert();
+        relation_request.assert();
     }
 
     #[test]

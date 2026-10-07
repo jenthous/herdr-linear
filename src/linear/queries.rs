@@ -111,6 +111,20 @@ pub fn issue_detail(c: &LinearClient, id: &str) -> Result<Option<IssueDetail>, A
         Err(ApiError::GraphQl(_) | ApiError::Decode(_)) => detail_query(c, id, false),
         other => other,
     };
+    found(result)
+}
+
+/// 관계가 필요 없을 때(브랜치 이슈 찾기) 쓰는 상세. 관계 필드를 보내지 않는다.
+/// 그래서 `relations`는 항상 `None`(모름)이고, 이슈가 없으면 `issue_detail`처럼 `Ok(None)`이다.
+pub fn issue_detail_without_relations(
+    c: &LinearClient,
+    id: &str,
+) -> Result<Option<IssueDetail>, ApiError> {
+    found(detail_query(c, id, false))
+}
+
+/// 상세 요청의 결과를 이슈 유무로 바꾼다. "찾을 수 없음" 오류는 이슈가 없다는 뜻이다.
+fn found(result: Result<IssueDetail, ApiError>) -> Result<Option<IssueDetail>, ApiError> {
     match result {
         Ok(d) => Ok(Some(d)),
         Err(ApiError::GraphQl(msg)) if is_not_found(&msg) => Ok(None),
@@ -693,5 +707,44 @@ mod tests {
             relation_request.assert();
             plain_request.assert();
         }
+    }
+
+    #[test]
+    fn detail_without_relations_sends_no_relation_fields() {
+        let mut server = mockito::Server::new();
+        // 관계 필드를 넣은 요청이 가면 안 된다
+        let relation_request = server
+            .mock("POST", "/graphql")
+            .match_body(relation_query_body())
+            .with_body(json!({ "data": { "issue": plain_detail_issue() } }).to_string())
+            .expect(0)
+            .create();
+        let plain_request = server
+            .mock("POST", "/graphql")
+            .match_body(plain_query_body())
+            .with_body(json!({ "data": { "issue": plain_detail_issue() } }).to_string())
+            .expect(1)
+            .create();
+        let d = issue_detail_without_relations(&client(&server), "ENG-1")
+            .unwrap()
+            .unwrap();
+        assert_eq!(d.issue.identifier, "ENG-1");
+        assert_eq!(d.relations, None, "관계는 받지 않았으니 모름");
+        plain_request.assert();
+        relation_request.assert();
+        // 없는 이슈는 `issue_detail`처럼 `None`이고, 다시 보내지 않는다
+        let mut server = mockito::Server::new();
+        let missing = server
+            .mock("POST", "/graphql")
+            .match_body(plain_query_body())
+            .with_status(400)
+            .with_body(r#"{"errors":[{"message":"Entity not found: Issue","extensions":{"code":"INVALID_INPUT"}}]}"#)
+            .expect(1)
+            .create();
+        assert_eq!(
+            issue_detail_without_relations(&client(&server), "ENG-404").unwrap(),
+            None
+        );
+        missing.assert();
     }
 }
