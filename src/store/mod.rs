@@ -10,8 +10,8 @@ use rusqlite::{Connection, Transaction, TransactionBehavior};
 
 use crate::config::ensure_private_dir;
 
-/// 스키마 버전. 다르면 캐시를 비우고 새로 만든다.
-pub const SCHEMA_VERSION: i64 = 1;
+/// 스키마 버전. 1(관계 테이블 없음)이면 테이블만 더하고, 그 밖의 다른 값이면 캐시를 비우고 새로 만든다.
+pub const SCHEMA_VERSION: i64 = 2;
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS meta (
@@ -59,6 +59,11 @@ CREATE TABLE IF NOT EXISTS branch_map (
   identifier TEXT,
   fetched_at INTEGER NOT NULL,
   PRIMARY KEY (repo, branch)
+);
+CREATE TABLE IF NOT EXISTS relations (
+  issue_id   TEXT PRIMARY KEY,
+  data       TEXT NOT NULL,
+  fetched_at INTEGER NOT NULL
 );
 ";
 
@@ -111,7 +116,9 @@ impl Store {
         // 잠금을 기다리는 사이 다른 프로세스가 만들었을 수 있으니 다시 확인한다
         let version = user_version(&tx)?;
         if version != SCHEMA_VERSION {
-            if version != 0 {
+            // 0은 새 파일이거나 만들다 끊긴 파일, 1은 관계 테이블만 없는 파일이다.
+            // 테이블을 모두 IF NOT EXISTS로 만들므로 둘은 비우지 않고 채운다
+            if !matches!(version, 0 | 1) {
                 drop_all_tables(&tx)?;
             }
             tx.execute_batch(SCHEMA)?;
@@ -317,5 +324,32 @@ mod tests {
             .mode()
             & 0o777;
         assert_eq!(dir_mode, 0o700);
+    }
+
+    #[test]
+    fn version_1_file_keeps_its_data_and_gains_relations() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cache.db");
+        {
+            let store = Store::open(&path).unwrap();
+            store.meta_set("k", "v").unwrap();
+            // 버전 1 파일: 관계 테이블이 없다
+            store.conn.execute_batch("DROP TABLE relations").unwrap();
+            store.conn.pragma_update(None, "user_version", 1).unwrap();
+        }
+        let store = Store::open(&path).unwrap();
+        assert_eq!(
+            store.meta_get("k").unwrap().as_deref(),
+            Some("v"),
+            "기존 캐시가 남는다"
+        );
+        let v: i64 = store
+            .conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, SCHEMA_VERSION);
+        store
+            .set_relations("i1", &crate::linear::types::IssueRelations::default(), 1)
+            .unwrap();
     }
 }

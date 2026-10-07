@@ -4,7 +4,7 @@ use anyhow::Result;
 use rusqlite::{OptionalExtension, params};
 
 use super::Store;
-use crate::linear::types::{Comment, Issue};
+use crate::linear::types::{Comment, Issue, IssueRelations};
 
 impl Store {
     pub fn meta_get(&self, key: &str) -> Result<Option<String>> {
@@ -42,7 +42,8 @@ impl Store {
     pub fn clear_all(&self) -> Result<()> {
         self.conn.execute_batch(
             "DELETE FROM meta; DELETE FROM issues; DELETE FROM comments; DELETE FROM view_results;
-             DELETE FROM team_refs; DELETE FROM workspace_labels; DELETE FROM branch_map;",
+             DELETE FROM team_refs; DELETE FROM workspace_labels; DELETE FROM branch_map;
+             DELETE FROM relations;",
         )?;
         Ok(())
     }
@@ -57,6 +58,10 @@ impl Store {
                 tx.execute("DELETE FROM issues WHERE id = ?1", params![issue.id])?;
                 tx.execute(
                     "DELETE FROM comments WHERE issue_id = ?1",
+                    params![issue.id],
+                )?;
+                tx.execute(
+                    "DELETE FROM relations WHERE issue_id = ?1",
                     params![issue.id],
                 )?;
                 removed.push(issue.id.clone());
@@ -119,6 +124,8 @@ impl Store {
             .execute("DELETE FROM issues WHERE id = ?1", params![id])?;
         self.conn
             .execute("DELETE FROM comments WHERE issue_id = ?1", params![id])?;
+        self.conn
+            .execute("DELETE FROM relations WHERE issue_id = ?1", params![id])?;
         Ok(())
     }
 
@@ -192,6 +199,36 @@ impl Store {
         })
     }
 
+    /// 상세의 관계(하위·막힘·막는 중·관련)를 저장한다.
+    pub fn set_relations(
+        &self,
+        issue_id: &str,
+        relations: &IssueRelations,
+        now_ms: i64,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO relations (issue_id, data, fetched_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT(issue_id) DO UPDATE SET data = excluded.data, fetched_at = excluded.fetched_at",
+            params![issue_id, serde_json::to_string(relations)?, now_ms],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_relations(&self, issue_id: &str) -> Result<Option<(IssueRelations, i64)>> {
+        let row: Option<(String, i64)> = self
+            .conn
+            .query_row(
+                "SELECT data, fetched_at FROM relations WHERE issue_id = ?1",
+                params![issue_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        Ok(match row {
+            Some((data, at)) => Some((serde_json::from_str(&data)?, at)),
+            None => None,
+        })
+    }
+
     /// 상세 화면을 열었다고 기록한다 ("최근 본").
     pub fn mark_viewed(&self, issue_id: &str, now_ms: i64) -> Result<()> {
         self.conn.execute(
@@ -224,6 +261,10 @@ impl Store {
         )?;
         self.conn.execute(
             "DELETE FROM comments WHERE issue_id NOT IN (SELECT id FROM issues)",
+            [],
+        )?;
+        self.conn.execute(
+            "DELETE FROM relations WHERE issue_id NOT IN (SELECT id FROM issues)",
             [],
         )?;
         Ok(n)
@@ -260,6 +301,7 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::linear::types::RelatedIssue;
     use crate::test_support::IssueBuilder;
 
     fn store() -> Store {
@@ -419,5 +461,66 @@ mod tests {
         );
         assert_eq!(s.branch_get("/repo", "main").unwrap(), Some((None, 20)));
         assert_eq!(s.branch_get("/other", "main").unwrap(), None);
+    }
+
+    fn relations() -> crate::linear::types::IssueRelations {
+        let i = IssueBuilder::new("b1", "ENG-9", "막는 이슈").build();
+        crate::linear::types::IssueRelations {
+            blocked_by: vec![RelatedIssue {
+                id: i.id,
+                identifier: i.identifier,
+                title: i.title,
+                state: i.state,
+            }],
+            more_children: true,
+            ..crate::linear::types::IssueRelations::default()
+        }
+    }
+
+    #[test]
+    fn relations_roundtrip() {
+        let s = store();
+        assert_eq!(s.get_relations("i1").unwrap(), None);
+        s.set_relations("i1", &relations(), 500).unwrap();
+        assert_eq!(s.get_relations("i1").unwrap(), Some((relations(), 500)));
+        s.set_relations("i1", &crate::linear::types::IssueRelations::default(), 600)
+            .unwrap();
+        assert_eq!(
+            s.get_relations("i1").unwrap(),
+            Some((crate::linear::types::IssueRelations::default(), 600)),
+            "덮어쓴다"
+        );
+    }
+
+    #[test]
+    fn relations_go_away_with_their_issue() {
+        let s = store();
+        for (id, ident) in [
+            ("a", "ENG-1"),
+            ("b", "ENG-2"),
+            ("c", "ENG-3"),
+            ("d", "ENG-4"),
+        ] {
+            s.upsert_issues(&[IssueBuilder::new(id, ident, "제목").build()], 100)
+                .unwrap();
+            s.set_relations(id, &relations(), 100).unwrap();
+        }
+        s.upsert_issues(
+            &[IssueBuilder::new("a", "ENG-1", "제목").archived().build()],
+            200,
+        )
+        .unwrap();
+        assert_eq!(s.get_relations("a").unwrap(), None, "보관된 이슈");
+        s.remove_issue("b").unwrap();
+        assert_eq!(s.get_relations("b").unwrap(), None, "지운 이슈");
+        s.mark_viewed("c", 1_000).unwrap();
+        s.evict_older_than(500).unwrap();
+        assert_eq!(s.get_relations("d").unwrap(), None, "오래된 이슈");
+        assert!(
+            s.get_relations("c").unwrap().is_some(),
+            "최근 본 이슈는 남는다"
+        );
+        s.clear_all().unwrap();
+        assert_eq!(s.get_relations("c").unwrap(), None, "모두 비우기");
     }
 }
