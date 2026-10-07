@@ -127,23 +127,13 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect, now: i64) -> Vec<Hit> {
     hits
 }
 
-/// 상단 오른쪽 상태: 갱신 중 / n분 전 갱신 / 오프라인 / 한도 초과.
+/// 상단 오른쪽 상태: 갱신 중 / n분 전 갱신 / 오프라인 / 오류. 한도 초과는 하단에 잠깐 알린다.
 pub fn status_span(app: &App, now: i64) -> Span<'static> {
     if app.loading > 0 {
         return Span::styled("갱신 중…", DIM);
     }
     match &app.problem {
         Some(Problem::Offline(_)) => Span::styled("오프라인", WARN),
-        Some(Problem::RateLimited(reset)) => {
-            let text = match reset {
-                Some(r) => format!(
-                    "한도 초과 · {}분 후 재시도",
-                    ((r - now).max(0) + 59_999) / 60_000
-                ),
-                None => "한도 초과".to_string(),
-            };
-            Span::styled(text, ERROR)
-        }
         Some(Problem::Error(_)) => Span::styled("오류", ERROR),
         None => match app.updated_at {
             Some(at) => Span::styled(format!("{} 갱신", ago(now, at)), DIM),
@@ -451,9 +441,6 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect, now: i64) {
                 format!(" 오프라인이라 저장된 내용을 보여줘요 ({})", sanitize(m)),
                 WARN,
             ),
-            Some(Problem::RateLimited(_)) => {
-                Span::styled(" 한도를 넘어서 저장된 결과만 보여줘요", ERROR)
-            }
             Some(Problem::Error(m)) => Span::styled(format!(" 오류: {}", sanitize(m)), ERROR),
             None => Span::styled(hints(app.mode), DIM),
         }
@@ -760,7 +747,7 @@ mod tests {
     }
 
     #[test]
-    fn status_shows_offline_and_rate_limit() {
+    fn rate_limit_shows_briefly_and_status_keeps_refresh_time() {
         let mut a = app();
         a.apply(
             Msg::Failed(crate::linear::client::ApiError::Offline("x".into())),
@@ -773,7 +760,12 @@ mod tests {
             }),
             T0,
         );
-        assert_eq!(status_span(&a, T0).content, "한도 초과 · 2분 후 재시도");
+        assert_eq!(status_span(&a, T0).content, "방금 갱신");
+        let (rows, _, _) = screen(&a, 80, 12);
+        assert_eq!(
+            rows[11],
+            " Linear API 한도를 넘었어요. 2분 후 다시 시도하세요"
+        );
     }
 
     #[test]

@@ -13,6 +13,8 @@ use crate::search::rank::{SearchIndex, merge};
 pub const SEARCH_DEBOUNCE_MS: i64 = 300;
 /// 하단 안내 문구를 보여주는 시간.
 pub const FLASH_MS: i64 = 3_000;
+/// 깊은 검색이 분당 한도에 걸렸을 때 안내.
+pub const DEEP_LIMIT_TEXT: &str = "깊은 검색은 분당 30회까지예요. 잠시 뒤 다시 시도하세요";
 /// 검색 결과로 보여줄 최대 줄 수.
 const MAX_RESULTS: usize = 200;
 
@@ -177,14 +179,15 @@ pub enum Msg {
     Failed(ApiError),
     /// 남은 요청이 적다. 이 시각(리셋)까지 자동 서버 검색을 멈춘다
     Throttled(i64),
+    /// 깊은 검색이 분당 한도에 걸렸다. 세어 둔 요청 하나를 끝내고 안내만 한다
+    DeepLimited,
     Flash(String),
 }
 
-/// 상단에 보이는 문제 상태.
+/// 상단에 보이는 문제 상태. 한도 초과는 하단에 잠깐 알리기만 해서 여기 없다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Problem {
     Offline(String),
-    RateLimited(Option<i64>),
     Error(String),
 }
 
@@ -397,6 +400,11 @@ impl App {
 
     fn done_loading(&mut self) {
         self.loading = self.loading.saturating_sub(1);
+    }
+
+    /// `until`까지 자동 서버 검색을 멈춘다. 이미 더 늦게까지 멈춰 있으면 그대로 둔다.
+    fn pause_until(&mut self, until: i64) {
+        self.paused_until = Some(self.paused_until.map_or(until, |p| p.max(until)));
     }
 
     fn succeeded(&mut self, now: i64) {
@@ -1000,27 +1008,49 @@ impl App {
                     d.loading = false;
                 }
                 self.tabs[Tab::All.index()].loading_more = false;
-                self.problem = Some(match e {
-                    ApiError::Offline(m) => Problem::Offline(m),
+                match e {
                     ApiError::RateLimited { reset_at_ms } => {
-                        self.paused_until = reset_at_ms;
-                        Problem::RateLimited(reset_at_ms)
+                        // 서버는 응답했으니 오프라인·오류 표시는 지운다. 한도는 잠깐 알리기만 한다
+                        self.problem = None;
+                        let text = match reset_at_ms {
+                            Some(reset) => {
+                                self.pause_until(reset);
+                                format!(
+                                    "Linear API 한도를 넘었어요. {}분 후 다시 시도하세요",
+                                    minutes_left(reset, now)
+                                )
+                            }
+                            None => "Linear API 한도를 넘었어요. 잠시 뒤 다시 시도하세요".into(),
+                        };
+                        self.set_flash(text, now);
                     }
-                    other => Problem::Error(other.to_string()),
-                });
+                    ApiError::Offline(m) => self.problem = Some(Problem::Offline(m)),
+                    other => self.problem = Some(Problem::Error(other.to_string())),
+                }
             }
             Msg::Throttled(until) => {
-                self.paused_until = Some(until);
-                let mins = ((until - now).max(0) + 59_999) / 60_000;
+                self.pause_until(until);
                 self.set_flash(
-                    format!("API 한도가 얼마 남지 않아 {mins}분 동안 자동 서버 검색을 멈춰요"),
+                    format!(
+                        "API 한도가 얼마 남지 않아 {}분 동안 자동 서버 검색을 멈춰요",
+                        minutes_left(until, now)
+                    ),
                     now,
                 );
+            }
+            Msg::DeepLimited => {
+                self.done_loading();
+                self.set_flash(DEEP_LIMIT_TEXT, now);
             }
             Msg::Flash(text) => self.set_flash(text, now),
         }
         Vec::new()
     }
+}
+
+/// `until`까지 남은 분 (올림).
+fn minutes_left(until: i64, now: i64) -> i64 {
+    ((until - now).max(0) + 59_999) / 60_000
 }
 
 #[cfg(test)]
@@ -1618,18 +1648,80 @@ mod tests {
     }
 
     #[test]
-    fn rate_limit_pauses_server_search_until_reset() {
+    fn rate_limit_is_a_short_notice_and_pauses_server_search() {
         let mut app = started();
+        app.apply(Msg::Failed(ApiError::Offline("연결 끊김".into())), T0);
         app.apply(
             Msg::Failed(ApiError::RateLimited {
                 reset_at_ms: Some(T0 + 60_000),
             }),
             T0,
         );
-        assert_eq!(app.problem, Some(Problem::RateLimited(Some(T0 + 60_000))));
+        assert_eq!(app.problem, None, "상단에 남기지 않는다");
+        assert_eq!(
+            app.flash_text(T0),
+            Some("Linear API 한도를 넘었어요. 1분 후 다시 시도하세요")
+        );
+        assert_eq!(app.flash_text(T0 + FLASH_MS), None, "잠깐만 보인다");
         type_str(&mut app, "결제", T0);
         assert!(app.tick(T0 + 1_000).is_empty());
         assert_eq!(app.tick(T0 + 60_000).len(), 1);
+    }
+
+    #[test]
+    fn rate_limit_without_reset_keeps_the_throttle_pause() {
+        let mut app = started();
+        app.apply(Msg::Throttled(T0 + 120_000), T0);
+        app.apply(Msg::Failed(ApiError::RateLimited { reset_at_ms: None }), T0);
+        assert_eq!(
+            app.flash_text(T0),
+            Some("Linear API 한도를 넘었어요. 잠시 뒤 다시 시도하세요")
+        );
+        type_str(&mut app, "결제", T0);
+        assert!(app.tick(T0 + 1_000).is_empty(), "앞서 정한 멈춤이 남는다");
+        assert_eq!(app.tick(T0 + 120_000).len(), 1);
+    }
+
+    #[test]
+    fn refresh_that_hits_the_limit_again_pauses_again() {
+        let mut app = started();
+        let limited = |reset| {
+            Msg::Failed(ApiError::RateLimited {
+                reset_at_ms: Some(reset),
+            })
+        };
+        app.apply(limited(T0 + 60_000), T0);
+        type_str(&mut app, "결제", T0);
+        app.handle(Input::Esc, T0);
+        app.handle(Input::Act(Act::Refresh), T0 + 5_000);
+        searched(&app.tick(T0 + 5_000), "결제");
+        app.apply(limited(T0 + 60_000), T0 + 6_000);
+        assert_eq!(app.loading, 0);
+        assert!(
+            app.flash_text(T0 + 6_000)
+                .is_some_and(|t| t.contains("한도"))
+        );
+        app.handle(Input::Search, T0 + 6_000);
+        type_str(&mut app, "x", T0 + 6_000);
+        assert!(app.tick(T0 + 7_000).is_empty(), "다시 멈춘다");
+    }
+
+    #[test]
+    fn deep_search_limit_keeps_local_results_and_refresh_time() {
+        let mut app = started();
+        type_str(&mut app, "로그인", T0 + 1_000);
+        let before = ids(&app);
+        app.handle(Input::Bottom, T0 + 1_000);
+        let effects = app.handle(Input::Enter, T0 + 1_000);
+        assert!(
+            matches!(&effects[..], [Effect::DeepSearch { .. }]),
+            "{effects:?}"
+        );
+        app.apply(Msg::DeepLimited, T0 + 2_000);
+        assert_eq!(app.loading, 0);
+        assert_eq!(app.flash_text(T0 + 2_000), Some(DEEP_LIMIT_TEXT));
+        assert_eq!(app.updated_at, Some(T0), "갱신 시각을 바꾸지 않는다");
+        assert_eq!(ids(&app), before, "로컬 결과를 그대로 둔다");
     }
 
     #[test]

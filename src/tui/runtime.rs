@@ -39,8 +39,6 @@ use crate::tui::{keys, view};
 pub const BRANCH_TTL_MS: i64 = 10 * 60 * 1000;
 /// "최근 본" 개수.
 pub const RECENT_LIMIT: usize = 50;
-/// 깊은 검색이 분당 한도에 걸렸을 때 안내.
-pub const DEEP_LIMIT_TEXT: &str = "깊은 검색은 분당 30회까지예요. 잠시 뒤 다시 시도하세요";
 
 const VIEW_MINE: &str = "mine";
 const VIEW_ALL: &str = "all";
@@ -290,20 +288,15 @@ impl Runtime {
                 issues: self.keep(found, now),
             }],
             Done::Search {
-                seq,
                 deep: true,
                 result: Err(ApiError::RateLimited { .. }),
+                ..
             } => {
                 // 깊은 검색에는 분당 30회 한도가 따로 있다. 응답의 리셋 시각은 시간당 요청 한도
-                // 기준이라 맞지 않으니, 자동 검색은 멈추지 않고 로컬 결과를 둔 채 안내만 한다
+                // 기준이라 맞지 않으니, 자동 검색은 멈추지 않고 로컬 결과를 둔 채 안내만 한다.
+                // 서버 결과를 받은 게 아니라서 갱신 시각도 바꾸지 않는다
                 self.log.write("깊은 검색: 한도 초과");
-                vec![
-                    Msg::Search {
-                        seq,
-                        issues: Vec::new(),
-                    },
-                    Msg::Flash(DEEP_LIMIT_TEXT.into()),
-                ]
+                vec![Msg::DeepLimited]
             }
             Done::Search { result: Err(e), .. } => self.failed(e, "검색"),
             Done::Detail {
@@ -1363,13 +1356,7 @@ mod tests {
         );
         assert_eq!(
             settle(&mut fx.rt, T0),
-            vec![
-                Msg::Search {
-                    seq: 4,
-                    issues: vec![]
-                },
-                Msg::Flash(DEEP_LIMIT_TEXT.into()),
-            ],
+            vec![Msg::DeepLimited],
             "50분 뒤 리셋 시각으로 자동 검색을 멈추지 않는다"
         );
     }
