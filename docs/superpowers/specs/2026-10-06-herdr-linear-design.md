@@ -253,7 +253,8 @@ Linear  [내 이슈]  최근 본  전체
 
 ### 4.6 상세 화면
 
-- **머리**: 식별자, 제목, 상태, 우선순위, 담당자, 열린 PR(번호·저장소), 라벨, 프로젝트, 사이클, 부모 이슈, 예상치, 마감일
+- **머리**: 식별자, 제목, 상태, 우선순위, 담당자, 열린 PR(번호·저장소), 라벨, 프로젝트, 사이클, 예상치, 마감일. 목록 옆 미리보기에서는 부모 이슈도 머리에 보인다.
+- **관계**: 머리 아래에 상위·막힘·막는 중·관련·하위를 상태 색과 함께 보여 준다. `t` 메뉴나 관계 줄 클릭으로 열고, Esc로 한 단계씩 돌아온다. 자세한 규칙은 `2026-10-07-issue-relations-design.md`를 따른다.
 - **본문**: markdown 렌더링(5장)
 - **코멘트**: 오래된 것부터 작성자, 시각, 본문(markdown)을 보여준다. 50개를 넘으면 "브라우저에서 더 보기"를 표시한다.
 - 저장된 내용을 먼저 보여주고 이슈와 코멘트를 1회 다시 불러와 바꾼다. 상세 화면을 열면 "최근 본"에 기록한다.
@@ -264,8 +265,8 @@ Linear  [내 이슈]  최근 본  전체
 |---|---|
 | 검색 모드 (팔레트 기본) | 글자 입력 = 검색어, ↑/↓ 또는 Ctrl+P/Ctrl+N = 이동, Enter = 상세, Tab/Shift+Tab = 보기 전환, Ctrl+K = 액션 메뉴, Esc = 목록 모드 |
 | 목록 모드 (사이드 패널 기본) | j/k·↑/↓ = 이동, g/G = 처음/끝, `/` = 검색 모드, Enter = 상세, Tab = 보기 전환, `r` = 새로고침, `s` 상태, `l` 라벨, `a` 담당자, `c` 코멘트, `p` 에이전트 전달, `n` 새 이슈, `o` 브라우저, `y` 티켓 URL 복사, `Y` 열린 PR 링크 복사(ID 복사는 Ctrl+K 메뉴), Ctrl+K = 액션 메뉴, `q` = 닫기(팔레트는 Esc도 닫기) |
-| 상세 화면 | j/k = 스크롤, Ctrl+D/Ctrl+U = 반 페이지, g/G = 처음/끝, `u` = 본문 링크·이미지 목록, `r` = 새로고침, 목록 모드와 같은 동작 키, Esc = 뒤로, `q` = 닫기 |
-| 마우스 | 휠 = 목록 이동·상세 스크롤·메뉴 이동, 줄 클릭 = 선택(선택된 줄을 다시 클릭하면 상세), 탭 이름 클릭 = 보기 전환, 메뉴 항목 클릭 = 실행 |
+| 상세 화면 | j/k = 스크롤, Ctrl+D/Ctrl+U = 반 페이지, g/G = 처음/끝, `t` = 관계 메뉴, `u` = 본문 링크·이미지 목록, `r` = 새로고침, 목록 모드와 같은 동작 키, Esc = 뒤로(관계 이슈에서 왔으면 앞 이슈로), `q` = 닫기 |
+| 마우스 | 휠 = 목록 이동·상세 스크롤·메뉴 이동, 줄 클릭 = 선택(선택된 줄을 다시 클릭하면 상세), 탭 이름 클릭 = 보기 전환, 메뉴 항목 클릭 = 실행, 상세의 관계 줄 클릭 = 그 이슈 열기 |
 | 메뉴(상태·라벨·담당자·액션) | 글자 입력 = 거르기, ↑/↓ = 이동, Enter = 적용, Space = 켜기/끄기(라벨), Esc = 취소 |
 | 입력(코멘트·새 이슈·에이전트 전달) | Ctrl+S = 보내기, Ctrl+E = 외부 편집기, Tab = 다음 칸(새 이슈), Esc = 취소(내용이 있으면 확인) |
 
@@ -315,7 +316,7 @@ herdr 밖에서 실행할 때(개발·테스트)는 `HERDR_LINEAR_CONFIG_DIR`과
 ### 6.2 캐시 스키마
 
 ```sql
--- PRAGMA user_version = 1. 값이 다르면 파일을 지우고 새로 만든다.
+-- PRAGMA user_version = 2. 1이면 relations 테이블만 더하고, 그 밖의 다른 값이면 파일을 지우고 새로 만든다.
 CREATE TABLE meta (
   key   TEXT PRIMARY KEY,   -- org_id, viewer(JSON), teams(JSON), last_team_id
   value TEXT NOT NULL
@@ -361,6 +362,11 @@ CREATE TABLE branch_map (
   identifier TEXT,               -- NULL이면 연결된 이슈 없음
   fetched_at INTEGER NOT NULL,
   PRIMARY KEY (repo, branch)
+);
+CREATE TABLE relations (
+  issue_id   TEXT PRIMARY KEY,
+  data       TEXT NOT NULL,      -- 하위·막힘·막는 중·관련 JSON
+  fetched_at INTEGER NOT NULL
 );
 ```
 
@@ -409,7 +415,7 @@ CREATE TABLE branch_map (
 | 전체 | `issues(filter: { team: { id: { in: <범위 팀 id> } } }, orderBy: updatedAt, first: 50, after: <커서>)` |
 | 검색 | `issues(filter: { and: [<텍스트 조건>, <토큰 조건>, <범위 팀 조건>] }, orderBy: updatedAt, first: 50)` |
 | 깊은 검색 | `searchIssues(term: <텍스트>, includeComments: true, first: 20, filter: <토큰 조건>)` |
-| 상세 | `issue(id: <식별자>) { ...IssueFields comments(first: 50) { nodes { id body createdAt editedAt user { id name displayName } } pageInfo { hasNextPage } } }` |
+| 상세 | `issue(id: <식별자>) { ...IssueFields comments(first: 50) { nodes { id body createdAt editedAt user { id name displayName } } pageInfo { hasNextPage } } children(first: 50) { … } relations(first: 50) { … } inverseRelations(first: 50) { … } }`. 관계 필드는 `2026-10-07-issue-relations-design.md` 4.1을 따른다 |
 | 브랜치 | `issueVcsBranchSearch(branchName: <브랜치>) { ...IssueFields }` |
 | 팀 참조 | `team(id: <팀>) { defaultIssueState { id } states { nodes { id name type color position } } labels(first: 250) { nodes { id name color isGroup parent { id } } } members(first: 250) { nodes { id name displayName active } } }` |
 | 워크스페이스 라벨 | `issueLabels(filter: { team: { null: true } }, first: 250) { nodes { id name color isGroup parent { id } } }` |
@@ -425,7 +431,7 @@ fragment IssueFields on Issue {
   assignee { id name displayName }
   project { id name }
   cycle { id number name }
-  parent { id identifier title }
+  parent { id identifier title state { id name type color } }
   labels(first: 20) { nodes { id name color } }
   attachments(first: 10) { nodes { url sourceType createdAt metadata } }
 }

@@ -25,6 +25,12 @@
 - Config warnings stay visible longer and also show on the key screen
 - CLI: piping output (`herdr-linear mine | head`) no longer crashes, `logout` clears the cache in both locations, and offline fallback no longer shows another workspace's cache right after a key change
 
+## ✅ v0.1.2 — issue relations
+
+- The detail view shows the parent, sub-issues, blocked by, blocking, and related issues, colored by state. Open blockers stand out in red.
+- Press `t` or click a line to open a related issue. Esc walks back one issue at a time.
+- `herdr-linear show` prints the same relations, and they stay readable offline.
+
 ## 🔜 v0.2 — side panel and actions (next)
 
 - **Side panel**: one key (`prefix+shift+i`) opens or closes a Linear pane to the right of your work. It starts in list mode and refreshes on its own, every 60 seconds by default.
@@ -82,6 +88,12 @@
 - 한도를 넘으면 상단에 남기지 않고 잠깐 알려요.
 - 설정 경고가 더 오래 보이고 키 입력 화면에도 보여요.
 - CLI: 출력을 파이프로 넘겨도(`herdr-linear mine | head`) 오류로 멈추지 않아요. `logout`은 두 위치의 캐시를 모두 지워요. 키를 바꾼 직후 오프라인이면 다른 워크스페이스 캐시를 보이지 않아요.
+
+## ✅ v0.1.2 — 관계 보기
+
+- 상세에 상위·하위·막힘·막는 중·관련 이슈를 상태 색과 함께 보여 줘요. 안 끝난 막는 이슈는 빨강으로 눈에 띄어요.
+- `t`를 누르거나 줄을 클릭하면 그 이슈로 가고, Esc로 한 단계씩 돌아와요.
+- `herdr-linear show`에도 같은 관계가 나오고, 오프라인에서도 볼 수 있어요.
 
 ## 🔜 v0.2 — 사이드 패널과 변경 동작 (다음)
 
