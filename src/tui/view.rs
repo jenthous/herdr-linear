@@ -175,7 +175,7 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect) {
     );
 }
 
-/// 이슈 머리: 식별자·제목 / 상태·우선순위·담당자 / 라벨·프로젝트·사이클·상위.
+/// 이슈 머리: 식별자·제목 / 상태·우선순위·담당자 / 라벨·프로젝트·사이클·상위·예상·마감.
 pub fn issue_header(issue: &Issue, width: u16) -> Vec<Line<'static>> {
     let mut lines = markdown::wrap_text(
         &format!("{}  {}", issue.identifier, issue.title),
@@ -235,6 +235,12 @@ pub fn issue_header(issue: &Issue, width: u16) -> Vec<Line<'static>> {
     if let Some(p) = &issue.parent {
         info.push(format!("상위 {}", p.identifier));
     }
+    if let Some(e) = issue.estimate {
+        info.push(format!("예상 {e}"));
+    }
+    if let Some(d) = &issue.due_date {
+        info.push(format!("마감 {}", sanitize(d)));
+    }
     if !info.is_empty() {
         let sep = if extra.is_empty() { "" } else { " · " };
         extra.push(Span::styled(format!("{sep}{}", info.join(" · ")), DIM));
@@ -282,10 +288,20 @@ fn draw_detail(f: &mut Frame, app: &App, area: Rect) -> u16 {
     let keys = app.team_keys();
     let mut lines: Vec<Line<'static>> = Vec::new();
     match &d.issue {
-        None => lines.push(Line::from(Span::styled(
-            format!("{} 불러오는 중…", sanitize(&d.id)),
-            DIM,
-        ))),
+        None => {
+            let id = sanitize(&d.id);
+            let (text, style) = if d.gone {
+                (format!("{id}: 찾을 수 없거나 보관·삭제된 이슈예요"), WARN)
+            } else if d.loading {
+                (format!("{id} 불러오는 중…"), DIM)
+            } else {
+                (
+                    format!("{id}: 불러오지 못했어요. r로 다시 시도하세요"),
+                    WARN,
+                )
+            };
+            lines.push(Line::from(Span::styled(text, style)));
+        }
         Some(issue) => {
             lines.extend(issue_header(issue, area.width));
             lines.push(Line::from(Span::styled(issue.url.clone(), DIM)));
@@ -695,6 +711,40 @@ mod tests {
                 .all(|r| !r.contains('\u{1b}') && !r.contains('\u{7}'))
         );
         assert!(rows.last().unwrap().contains("오류: 나쁜"), "{rows:?}");
+    }
+
+    #[test]
+    fn detail_without_cache_shows_gone_or_failure() {
+        let (mut gone, _) = App::start(Some("UTF-8".into()));
+        gone.apply(Msg::DetailGone("UTF-8".into()), T0);
+        let text = screen(&gone, 80, 12).0.join("\n");
+        assert!(
+            text.contains("찾을 수 없") && !text.contains("불러오는 중"),
+            "{text}"
+        );
+        let (mut failed, _) = App::start(Some("ENG-9".into()));
+        failed.apply(
+            Msg::Failed(crate::linear::client::ApiError::Offline("x".into())),
+            T0,
+        );
+        let text = screen(&failed, 80, 12).0.join("\n");
+        assert!(
+            text.contains("불러오지 못했어요") && !text.contains("불러오는 중"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn header_shows_estimate_and_due_date() {
+        let mut v = IssueBuilder::new("a", "ENG-1", "로그인 버그").json();
+        v["estimate"] = serde_json::json!(3.0);
+        v["dueDate"] = serde_json::json!("2026-10-31");
+        let issue: Issue = serde_json::from_value(v).unwrap();
+        let text = markdown::to_plain(&issue_header(&issue, 80));
+        assert!(
+            text.contains("예상 3") && text.contains("마감 2026-10-31"),
+            "{text}"
+        );
     }
 
     #[test]

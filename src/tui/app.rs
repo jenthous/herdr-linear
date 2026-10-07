@@ -434,6 +434,8 @@ impl App {
     }
 
     fn query_changed(&mut self, now: i64) {
+        // 이전 검색어로 보낸 요청의 응답은 이제 버린다 (새 요청이 아직 안 나갔어도)
+        self.search_seq += 1;
         self.results = None;
         self.rebuild(false);
         self.search_due = (!parse(&self.query).is_empty()).then_some(now + SEARCH_DEBOUNCE_MS);
@@ -663,7 +665,6 @@ impl App {
 
     fn switch_tab(&mut self, tab: Tab, now: i64) -> Vec<Effect> {
         self.tab = tab;
-        self.mode = Mode::List;
         if !self.query.is_empty() {
             self.query.clear();
             self.query_changed(now);
@@ -1020,6 +1021,14 @@ mod tests {
             .collect()
     }
 
+    /// 서버 검색 요청 하나의 순번. 순번 값 자체는 내부 카운터라 테스트가 정하지 않는다.
+    fn searched(effects: &[Effect], want: &str) -> u64 {
+        match effects {
+            [Effect::Search { seq, query }] if query == want => *seq,
+            other => panic!("'{want}' 서버 검색 하나가 아님: {other:?}"),
+        }
+    }
+
     fn type_str(app: &mut App, s: &str, now: i64) {
         for c in s.chars() {
             app.handle(Input::Char(c), now);
@@ -1073,17 +1082,10 @@ mod tests {
         type_str(&mut app, "결제", T0);
         assert_eq!(ids(&app), vec!["ENG-2", "<deep>"]);
         assert!(app.tick(T0 + 100).is_empty());
-        let effects = app.tick(T0 + SEARCH_DEBOUNCE_MS);
-        assert_eq!(
-            effects,
-            vec![Effect::Search {
-                seq: 1,
-                query: "결제".into()
-            }]
-        );
+        let seq = searched(&app.tick(T0 + SEARCH_DEBOUNCE_MS), "결제");
         app.apply(
             Msg::Search {
-                seq: 1,
+                seq,
                 issues: vec![issue("c", "ENG-3", "결제 실패 알림")],
             },
             T0 + 400,
@@ -1100,12 +1102,12 @@ mod tests {
     fn stale_search_results_are_ignored() {
         let mut app = started();
         type_str(&mut app, "로", T0);
-        app.tick(T0 + SEARCH_DEBOUNCE_MS);
+        let first = searched(&app.tick(T0 + SEARCH_DEBOUNCE_MS), "로");
         type_str(&mut app, "그", T0 + 350);
-        app.tick(T0 + 350 + SEARCH_DEBOUNCE_MS);
+        searched(&app.tick(T0 + 350 + SEARCH_DEBOUNCE_MS), "로그");
         app.apply(
             Msg::Search {
-                seq: 1,
+                seq: first,
                 issues: vec![issue("x", "ENG-9", "로그 수집")],
             },
             T0 + 700,
@@ -1120,13 +1122,17 @@ mod tests {
         type_str(&mut app, "ENG", T0);
         app.handle(Input::Down, T0);
         let chosen = app.selected_issue().unwrap().id.clone();
-        app.tick(T0 + SEARCH_DEBOUNCE_MS);
+        let seq = searched(&app.tick(T0 + SEARCH_DEBOUNCE_MS), "ENG");
         app.apply(
             Msg::Search {
-                seq: 1,
+                seq,
                 issues: vec![issue("z", "ENG-0", "ENG 맨 앞에 올 결과")],
             },
             T0 + 400,
+        );
+        assert!(
+            ids(&app).contains(&"ENG-0".to_string()),
+            "서버 결과가 합쳐졌다"
         );
         assert_eq!(app.selected_issue().unwrap().id, chosen);
         app.handle(Input::Char('-'), T0 + 500);
@@ -1200,6 +1206,44 @@ mod tests {
         let d = app.detail.as_ref().unwrap();
         assert_eq!(d.issue.as_ref().unwrap().identifier, "ENG-1");
         assert!(d.loading, "자기 응답을 아직 기다린다");
+    }
+
+    #[test]
+    fn tab_switch_keeps_the_mode_so_typing_still_searches() {
+        let mut app = started();
+        app.handle(Input::NextTab, T0);
+        assert_eq!(
+            app.mode,
+            Mode::Search,
+            "글자가 동작(r·o·y·q)으로 바뀌면 안 된다"
+        );
+        type_str(&mut app, "error", T0);
+        assert_eq!(app.query, "error");
+        app.handle(Input::Esc, T0);
+        app.handle(Input::NextTab, T0);
+        assert_eq!(app.mode, Mode::List, "목록 모드는 목록 모드로 남는다");
+    }
+
+    #[test]
+    fn response_for_an_edited_query_is_ignored() {
+        let mut app = started();
+        type_str(&mut app, "결제", T0);
+        let seq = searched(&app.tick(T0 + SEARCH_DEBOUNCE_MS), "결제");
+        app.handle(Input::ClearLine, T0 + 400);
+        type_str(&mut app, "다크", T0 + 400);
+        app.apply(
+            Msg::Search {
+                seq,
+                issues: vec![issue("z", "ENG-77", "결제 승인 실패")],
+            },
+            T0 + 500,
+        );
+        assert!(
+            !ids(&app).contains(&"ENG-77".to_string()),
+            "{:?}",
+            ids(&app)
+        );
+        assert_eq!(app.loading, 0, "늦은 응답도 자기 요청 하나는 끝낸다");
     }
 
     #[test]
@@ -1313,12 +1357,10 @@ mod tests {
         let mut app = started();
         type_str(&mut app, "세션", T0);
         assert_eq!(ids(&app), vec!["<deep>"]);
-        assert_eq!(
-            app.handle(Input::Enter, T0),
-            vec![Effect::DeepSearch {
-                seq: 1,
-                query: "세션".into()
-            }]
+        let effects = app.handle(Input::Enter, T0);
+        assert!(
+            matches!(&effects[..], [Effect::DeepSearch { query, .. }] if query == "세션"),
+            "{effects:?}"
         );
     }
 

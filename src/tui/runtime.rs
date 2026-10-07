@@ -105,6 +105,8 @@ pub struct Runtime {
     /// 자동 검색을 멈추라고 이미 알린 리셋 시각
     throttled: Option<i64>,
     scope_warned: bool,
+    /// viewer를 받는 중인지 (같은 확인을 두 번 보내지 않는다)
+    viewer_pending: bool,
 }
 
 impl Runtime {
@@ -139,6 +141,7 @@ impl Runtime {
             gate: None,
             throttled: None,
             scope_warned: false,
+            viewer_pending: false,
         }
     }
 
@@ -165,6 +168,8 @@ impl Runtime {
             && let Some(queue) = self.gate.as_mut()
         {
             queue.push(effect);
+            // 확인이 실패해 멈춰 있었다면 이 요청을 계기로 다시 확인한다
+            self.fetch_viewer(&client);
             return Vec::new();
         }
         match effect {
@@ -225,6 +230,9 @@ impl Runtime {
     /// 스레드에서 끝난 일을 캐시에 반영하고 앱에 알릴 것을 돌려준다.
     pub fn absorb(&mut self, done: Done, now: i64) -> Vec<Msg> {
         self.in_flight = self.in_flight.saturating_sub(1);
+        if matches!(done, Done::Viewer(_)) {
+            self.viewer_pending = false;
+        }
         let mut msgs = match done {
             Done::Viewer(Ok(v)) => {
                 if let Some(c) = &self.client {
@@ -240,9 +248,8 @@ impl Runtime {
                 self.failed(ApiError::Auth, "내 정보")
             }
             Done::Viewer(Err(e)) => {
-                // 확인하지 못했어도 미뤄 둔 일은 한다 (오프라인이면 캐시로 보인다)
                 self.log.write(&format!("내 정보: {e}"));
-                self.open_gate(now)
+                self.fail_gate(e)
             }
             Done::Page {
                 tab,
@@ -430,7 +437,6 @@ impl Runtime {
     }
 
     fn init(&mut self, client: &Arc<LinearClient>, now: i64) -> Vec<Msg> {
-        let c = client.clone();
         match self
             .note(cached_viewer(&self.store, &client.key_fingerprint()))
             .flatten()
@@ -439,16 +445,38 @@ impl Runtime {
                 let mut msgs = self.viewer_known(v);
                 msgs.push(Msg::Index(self.all_issues()));
                 if now - at >= VIEWER_TTL_MS {
-                    self.spawn(move || Done::Viewer(queries::viewer(&c)));
+                    self.fetch_viewer(client);
                 }
                 msgs
             }
             None => {
-                self.gate = Some(Vec::new());
-                self.spawn(move || Done::Viewer(queries::viewer(&c)));
+                self.gate.get_or_insert_with(Vec::new);
+                self.fetch_viewer(client);
                 Vec::new()
             }
         }
+    }
+
+    fn fetch_viewer(&mut self, client: &Arc<LinearClient>) {
+        if self.viewer_pending {
+            return;
+        }
+        self.viewer_pending = true;
+        let c = client.clone();
+        self.spawn(move || Done::Viewer(queries::viewer(&c)));
+    }
+
+    /// 워크스페이스를 확인하지 못했다. 캐시가 다른 워크스페이스 것일 수 있으니 계속 미뤄 두고,
+    /// 미뤄 둔 세는 요청은 실패로 끝낸다 ("갱신 중…"이 남지 않게). 다음 요청 때 다시 확인한다.
+    fn fail_gate(&mut self, e: ApiError) -> Vec<Msg> {
+        let Some(queue) = self.gate.as_mut() else {
+            return Vec::new();
+        };
+        std::mem::take(queue)
+            .iter()
+            .filter(|effect| counted(effect))
+            .map(|_| Msg::Failed(e.clone()))
+            .collect()
     }
 
     /// viewer를 기억하고 앱에 알린다. config의 팀이 하나도 안 맞으면 한 번 경고한다.
@@ -623,6 +651,18 @@ impl Runtime {
         self.throttled = Some(reset);
         Some(Msg::Throttled(reset))
     }
+}
+
+/// 앱이 "불러오는 중"으로 세는 요청인지. 끝날 때 앱에 결과나 실패를 꼭 돌려줘야 한다.
+fn counted(effect: &Effect) -> bool {
+    matches!(
+        effect,
+        Effect::LoadTab(_)
+            | Effect::LoadMore
+            | Effect::Search { .. }
+            | Effect::DeepSearch { .. }
+            | Effect::OpenDetail(_)
+    )
 }
 
 /// 이슈 본문의 링크는 누구나 쓸 수 있으니 브라우저로는 http(s)만 넘긴다.
@@ -925,6 +965,49 @@ mod tests {
         let fresh = msgs.iter().find(|m| matches!(m, Msg::Tab { .. })).unwrap();
         assert_eq!(tab_titles(fresh), (true, vec!["내 이슈".to_string()]));
         assert!(fx.rt.store.get_issue("OPS-1").unwrap().is_none());
+    }
+
+    #[test]
+    fn unverified_workspace_stays_hidden_when_viewer_fails() {
+        let mut fx = fixture(Some(KeySource::Env), false, Origin::default());
+        fx.rt.store.ensure_org("other-org").unwrap();
+        fx.rt
+            .store
+            .upsert_issues(&[issue("x", "OPS-1", "다른 워크스페이스")], T0)
+            .unwrap();
+        fx.rt.store.set_view("mine", &["x".into()], T0).unwrap();
+        fx.server
+            .mock("POST", "/graphql")
+            .with_status(503)
+            .with_body("busy")
+            .create();
+        assert!(fx.rt.execute(Effect::Init, T0).is_empty());
+        assert!(fx.rt.execute(Effect::LoadTab(Tab::Mine), T0).is_empty());
+        assert_eq!(
+            settle(&mut fx.rt, T0),
+            vec![Msg::Failed(ApiError::Offline(
+                "Linear 서버 오류 (503)".into()
+            ))],
+            "확인 전에는 캐시를 보이지 않고, 세는 요청만 실패로 끝낸다"
+        );
+        // 다음 요청 때 다시 확인하고, 확인되면 그때 불러온다
+        fx.server.reset();
+        mock(&mut fx.server, "Viewer", json!({ "viewer": viewer_json() }));
+        mock(
+            &mut fx.server,
+            "Issues",
+            page(&[issue("a", "ENG-1", "내 이슈")], None),
+        );
+        assert!(fx.rt.execute(Effect::LoadTab(Tab::Mine), T0).is_empty());
+        let msgs = settle(&mut fx.rt, T0);
+        assert!(matches!(msgs[0], Msg::Viewer(_)), "{msgs:?}");
+        assert_eq!(
+            msgs[1],
+            Msg::Index(vec![]),
+            "다른 워크스페이스 캐시는 비웠다"
+        );
+        let fresh = msgs.iter().find(|m| matches!(m, Msg::Tab { .. })).unwrap();
+        assert_eq!(tab_titles(fresh), (true, vec!["내 이슈".to_string()]));
     }
 
     #[test]
