@@ -4,8 +4,11 @@ fn main() {
     let cli = herdr_linear::cli::Cli::parse();
     match herdr_linear::cli::run(cli) {
         Ok(out) => {
-            if !out.is_empty() {
-                println!("{out}");
+            if !out.is_empty()
+                && let Err(e) = herdr_linear::cli::write_out(&mut std::io::stdout().lock(), &out)
+            {
+                eprintln!("오류: 출력하지 못했어요: {e}");
+                std::process::exit(1);
             }
         }
         Err(e) => {

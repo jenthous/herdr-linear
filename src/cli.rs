@@ -1,6 +1,6 @@
 //! 명령: login, logout, whoami, mine, search, show와 herdr용 open, ui.
 
-use std::io::IsTerminal;
+use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 
 use anyhow::{Result, anyhow, bail};
@@ -96,6 +96,14 @@ pub struct Ctx {
     pub color: bool,
     /// markdown 렌더링 폭
     pub width: u16,
+}
+
+/// 출력을 쓴다. 받는 쪽이 먼저 끝났으면(`herdr-linear mine | head`) 조용히 넘어간다.
+pub fn write_out(w: &mut impl Write, out: &str) -> std::io::Result<()> {
+    match writeln!(w, "{out}").and_then(|()| w.flush()) {
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
+        other => other,
+    }
 }
 
 pub fn now_ms() -> i64 {
@@ -1293,5 +1301,26 @@ mod tests {
             let err = out.unwrap_err().to_string();
             assert!(err.contains("이 키로 저장된"), "{err}");
         }
+    }
+
+    /// 받는 쪽이 먼저 끝난 파이프 (`herdr-linear mine | head`)
+    struct ClosedPipe;
+
+    impl std::io::Write for ClosedPipe {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::ErrorKind::BrokenPipe.into())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn closed_pipe_is_not_an_error() {
+        assert!(write_out(&mut ClosedPipe, "ENG-1").is_ok());
+        let mut buf = Vec::new();
+        write_out(&mut buf, "ENG-1").unwrap();
+        assert_eq!(buf, b"ENG-1\n");
     }
 }
