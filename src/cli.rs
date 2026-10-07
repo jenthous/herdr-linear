@@ -306,6 +306,12 @@ pub fn cached_viewer(store: &Store, key_fp: &str) -> Result<Option<(Viewer, i64)
     )
 }
 
+/// 이 키로 워크스페이스를 확인한 캐시인지. 아니면(키를 바꾼 직후 오프라인) 캐시가 다른
+/// 워크스페이스 것일 수 있어서 오프라인 대체에 쓰지 않는다.
+fn cache_is_ours(ctx: &Ctx) -> Result<bool> {
+    Ok(cached_viewer(&ctx.store, &ctx.client.key_fingerprint())?.is_some())
+}
+
 /// 검색 범위 팀. config의 `teams`가 비어 있으면 내가 속한 팀 전부.
 pub fn scope_teams<'a>(viewer: &'a Viewer, settings: &Settings) -> Vec<&'a TeamRef> {
     viewer
@@ -384,17 +390,22 @@ pub fn mine(ctx: &Ctx) -> Result<String> {
             ctx.store.set_view("mine", &ids, ctx.now_ms)?;
             Ok(format_list(ctx, &issues, None))
         }
-        Err(ApiError::Offline(msg)) => match ctx.store.get_view("mine")? {
-            Some((issues, at)) => Ok(format_list(
-                ctx,
-                &issues,
-                Some(&format!(
-                    "오프라인: {} 저장된 결과 · {msg}",
-                    ago(ctx.now_ms, at)
+        Err(ApiError::Offline(msg)) => {
+            if !cache_is_ours(ctx)? {
+                bail!("오프라인이고 이 키로 저장된 결과가 없어요: {msg}");
+            }
+            match ctx.store.get_view("mine")? {
+                Some((issues, at)) => Ok(format_list(
+                    ctx,
+                    &issues,
+                    Some(&format!(
+                        "오프라인: {} 저장된 결과 · {msg}",
+                        ago(ctx.now_ms, at)
+                    )),
                 )),
-            )),
-            None => Err(anyhow!("오프라인이고 저장된 결과도 없어요: {msg}")),
-        },
+                None => Err(anyhow!("오프라인이고 저장된 결과도 없어요: {msg}")),
+            }
+        }
         Err(e) => Err(api_error(ctx, e)),
     }
 }
@@ -433,11 +444,16 @@ pub fn search(ctx: &Ctx, input: &str, deep: bool) -> Result<String> {
                 None,
             ))
         }
-        Err(ApiError::Offline(msg)) => Ok(format_list(
-            ctx,
-            &local[..local.len().min(SEARCH_LIMIT)],
-            Some(&format!("오프라인: 저장된 이슈에서만 찾았어요 · {msg}")),
-        )),
+        Err(ApiError::Offline(msg)) => {
+            if !cache_is_ours(ctx)? {
+                bail!("오프라인이고 이 키로 저장된 이슈가 없어요: {msg}");
+            }
+            Ok(format_list(
+                ctx,
+                &local[..local.len().min(SEARCH_LIMIT)],
+                Some(&format!("오프라인: 저장된 이슈에서만 찾았어요 · {msg}")),
+            ))
+        }
         Err(e) => Err(api_error(ctx, e)),
     }
 }
@@ -476,6 +492,9 @@ pub fn show(ctx: &Ctx, id: &str) -> Result<String> {
             bail!("{id} 이슈를 찾을 수 없어요 (보관·삭제됐거나 권한이 없을 수 있어요)")
         }
         Err(ApiError::Offline(msg)) => {
+            if !cache_is_ours(ctx)? {
+                bail!("오프라인이고 이 키로 저장된 {id}도 없어요: {msg}");
+            }
             let issue = ctx
                 .store
                 .get_issue(id)?
@@ -704,6 +723,12 @@ mod tests {
     /// 아무도 듣지 않는 주소 (오프라인 흉내)
     const OFFLINE: &str = "http://127.0.0.1:9/graphql";
 
+    /// 이 키로 워크스페이스를 확인해 둔 캐시 (오프라인 대체에 쓸 수 있다).
+    fn trust_cache(ctx: &Ctx) {
+        let v: Viewer = serde_json::from_value(viewer_json()).unwrap();
+        save_viewer(&ctx.store, &v, NOW, &ctx.client.key_fingerprint()).unwrap();
+    }
+
     fn viewer_json() -> Value {
         json!({
             "id": "me", "name": "김민수", "displayName": "minsu", "email": "m@acme.dev",
@@ -805,6 +830,7 @@ mod tests {
     #[test]
     fn mine_offline_uses_saved_view() {
         let (_d, ctx) = test_ctx(OFFLINE.into());
+        trust_cache(&ctx);
         ctx.store
             .upsert_issues(
                 &[IssueBuilder::new("i1", "ENG-1", "저장된 이슈").build()],
@@ -861,6 +887,7 @@ mod tests {
     #[test]
     fn search_offline_falls_back_to_local() {
         let (_d, ctx) = test_ctx(OFFLINE.into());
+        trust_cache(&ctx);
         ctx.store
             .upsert_issues(
                 &[IssueBuilder::new("l1", "OPS-9", "로그인 서버").build()],
@@ -955,6 +982,7 @@ mod tests {
     #[test]
     fn show_offline_uses_cache() {
         let (_d, ctx) = test_ctx(OFFLINE.into());
+        trust_cache(&ctx);
         ctx.store
             .upsert_issues(
                 &[IssueBuilder::new("i1", "ENG-1", "저장된 상세")
@@ -1106,6 +1134,7 @@ mod tests {
             .build();
         assert_eq!(issue_line(&issue), "○ ENG-1     로그인[2J 버그  @민수]0;x");
         let (_d, ctx) = test_ctx(OFFLINE.into());
+        trust_cache(&ctx);
         ctx.store.upsert_issues(&[issue], NOW).unwrap();
         let out = show(&ctx, "ENG-1").unwrap();
         assert!(!out.contains('\u{1b}'), "{out:?}");
@@ -1115,6 +1144,7 @@ mod tests {
     #[test]
     fn show_strips_entity_encoded_escapes_with_color_on() {
         let (_d, mut ctx) = test_ctx(OFFLINE.into());
+        trust_cache(&ctx);
         ctx.color = true;
         ctx.store
             .upsert_issues(
@@ -1240,5 +1270,28 @@ mod tests {
         assert!(out.contains("\u{1b}[38;2;94;106;210m"), "{out:?}");
         assert!(out.contains("\u{1b}[38;2;235;87;87m"), "{out:?}");
         assert!(out.contains("ENG-1"), "{out:?}");
+    }
+
+    #[test]
+    fn offline_after_key_change_hides_the_other_workspace() {
+        let (_d, ctx) = test_ctx(OFFLINE.into());
+        // 이전 키로 확인한 워크스페이스의 캐시
+        let v: Viewer = serde_json::from_value(viewer_json()).unwrap();
+        save_viewer(&ctx.store, &v, NOW, "fp-of-another-key").unwrap();
+        ctx.store
+            .upsert_issues(
+                &[IssueBuilder::new("o1", "OLD-1", "옛 워크스페이스").build()],
+                NOW,
+            )
+            .unwrap();
+        ctx.store.set_view("mine", &["o1".into()], NOW).unwrap();
+        for out in [
+            mine(&ctx),
+            search(&ctx, "워크스페이스", false),
+            show(&ctx, "OLD-1"),
+        ] {
+            let err = out.unwrap_err().to_string();
+            assert!(err.contains("이 키로 저장된"), "{err}");
+        }
     }
 }
