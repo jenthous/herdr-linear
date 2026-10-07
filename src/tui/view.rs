@@ -799,7 +799,12 @@ mod tests {
             rows.iter()
                 .all(|r| !r.contains('\u{1b}') && !r.contains('\u{7}'))
         );
-        assert!(rows.last().unwrap().contains("오류: 나쁜"), "{rows:?}");
+        let footer = rows.last().unwrap();
+        assert!(
+            footer.contains("오류: Linear가 요청을 처리하지 못했어요: 나쁜"),
+            "{rows:?}"
+        );
+        assert!(!footer.contains("오류: Linear 오류"), "{footer}");
     }
 
     #[test]

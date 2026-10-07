@@ -23,7 +23,7 @@ pub enum ApiError {
     RateLimited { reset_at_ms: Option<i64> },
     #[error("API 키가 만료됐거나 권한이 없어요")]
     Auth,
-    #[error("Linear 오류: {0}")]
+    #[error("Linear가 요청을 처리하지 못했어요: {0}")]
     GraphQl(String),
     #[error("오프라인: {0}")]
     Offline(String),
