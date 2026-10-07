@@ -484,16 +484,21 @@ pub fn show(ctx: &Ctx, id: &str) -> Result<String> {
             }
             ctx.store
                 .set_comments(&d.issue.id, &d.comments, ctx.now_ms)?;
-            if let Some(r) = &d.relations {
-                ctx.store.set_relations(&d.issue.id, r, ctx.now_ms)?;
-            }
+            // 관계 없이 다시 받았으면(None) 저장된 관계를 보여 주기만 하고 저장은 건드리지 않는다
+            let stored = match &d.relations {
+                Some(r) => {
+                    ctx.store.set_relations(&d.issue.id, r, ctx.now_ms)?;
+                    None
+                }
+                None => ctx.store.get_relations(&d.issue.id)?.map(|(r, _)| r),
+            };
             ctx.store.mark_viewed(&d.issue.id, ctx.now_ms)?;
             Ok(format_detail(
                 ctx,
                 &d.issue,
                 &d.comments,
                 d.more_comments,
-                d.relations.as_ref(),
+                d.relations.as_ref().or(stored.as_ref()),
                 None,
                 &keys,
             ))
@@ -1414,5 +1419,54 @@ mod tests {
         let out = show(&ctx, "ENG-1").unwrap();
         assert!(out.starts_with("(오프라인: 저장된 내용"), "{out}");
         assert!(out.contains("막힘    ○ ENG-20    API 스키마"), "{out}");
+    }
+
+    #[test]
+    fn show_keeps_cached_relations_when_the_retry_has_none() {
+        let mut server = mockito::Server::new();
+        // 관계 필드 때문에 응답 전체가 오류면 관계 없이 한 번 더 받는다 (관계는 모름)
+        let with_relations = server
+            .mock("POST", "/graphql")
+            .match_body(Matcher::Regex("inverseRelations".into()))
+            .with_body(r#"{"errors":[{"message":"Entity not found: Issue"}]}"#)
+            .expect(1)
+            .create();
+        let mut issue = IssueBuilder::new("i1", "ENG-1", "로그인 버그")
+            .description("본문")
+            .json();
+        issue["comments"] =
+            json!({ "nodes": [], "pageInfo": { "hasNextPage": false, "endCursor": null } });
+        let without_relations = server
+            .mock("POST", "/graphql")
+            .match_body(Matcher::Regex(r"endCursor \} \} \} \}".into()))
+            .with_body(json!({ "data": { "issue": issue } }).to_string())
+            .expect(1)
+            .create();
+        let (_d, ctx) = test_ctx(url(&server));
+        let blocker = IssueBuilder::new("b1", "ENG-20", "API 스키마").build();
+        let cached = IssueRelations {
+            blocked_by: vec![RelatedIssue {
+                id: blocker.id,
+                identifier: blocker.identifier,
+                title: blocker.title,
+                state: blocker.state,
+            }],
+            ..IssueRelations::default()
+        };
+        let saved_at = NOW - 60_000;
+        ctx.store.set_relations("i1", &cached, saved_at).unwrap();
+        let out = show(&ctx, "ENG-1").unwrap();
+        assert!(!out.starts_with("(오프라인"), "서버에서 받은 상세다\n{out}");
+        assert!(
+            out.contains("막힘    ○ ENG-20    API 스키마"),
+            "저장된 관계를 보여 준다\n{out}"
+        );
+        assert_eq!(
+            ctx.store.get_relations("i1").unwrap(),
+            Some((cached, saved_at)),
+            "관계 없이 받은 응답은 저장된 관계를 건드리지 않는다"
+        );
+        with_relations.assert();
+        without_relations.assert();
     }
 }
