@@ -1,7 +1,7 @@
 # 사이드 pane 설계 (v0.2)
 
 - 작성일: 2026-10-08
-- 상태: 사용자 리뷰 대기
+- 상태: 승인 (2026-10-08, hover 반영)
 - 버전: v0.2.0
 - 바탕 스펙: `docs/superpowers/specs/2026-10-06-herdr-linear-design.md`의 3.1(매니페스트), 3.3(진입 흐름), 4.2(사이드 패널), 6.1(파일), 7.1(자동 요청 멈춤), 11(설정)
   - 이 문서와 다른 부분은 이 문서를 따른다. 특히 4.2의 화면 배치("목록 위·미리보기 아래")는 쓰지 않는다.
@@ -9,7 +9,7 @@
 
 ## 1. 목적
 
-팝업 대신 herdr pane에 Linear를 상시로 띄워 두고 본다. 화면은 지금 팝업 팔레트와 같고, 상시로 띄워 두는 데 필요한 것만 더한다. 함께 목록 줄에 우선순위를 보여 준다(4장).
+팝업 대신 herdr pane에 Linear를 상시로 띄워 두고 본다. 화면은 지금 팝업 팔레트와 같고, 상시로 띄워 두는 데 필요한 것만 더한다. 함께 목록 줄에 우선순위를 보여 주고(4장), 마우스를 올린 곳을 밝게 한다(5장).
 
 ### 1.1 성공 기준
 
@@ -19,6 +19,7 @@
 4. 가만히 있을 때 CPU를 거의 쓰지 않는다. 다시 그리기는 바뀐 게 있을 때와 1초에 한 번뿐이다.
 5. 팝업 팔레트는 지금처럼 따로 쓴다.
 6. 목록 줄(팝업·사이드 pane·CLI `mine`·`search`)에 우선순위가 Linear식 막대로 보인다.
+7. 누를 수 있는 곳(목록 줄, 관계 줄, 메뉴 항목, 탭 이름) 위에 마우스를 올리면 그 줄이 옅게 밝아진다.
 
 ### 1.2 범위 밖
 
@@ -102,19 +103,30 @@ description = "Linear 사이드 pane"
 - CLI의 색을 끈 출력(`issue_line`)은 흐린 막대를 빈칸으로 쓴다(높음 `▂▄▆`, 보통 `▂▄ `, 낮음 `▂  `, 긴급 ` ! `, 없음 빈칸). 색을 켠 출력은 TUI와 같은 줄(`issue_row`)을 쓴다.
 - 관계 칸의 줄(`ui::relations`)에는 넣지 않는다. 관계 이슈는 우선순위를 받지 않는다.
 
-## 5. 다시 그리기 (팝업·사이드 공통)
+## 5. 마우스 hover (팝업·사이드 공통)
+
+herdr는 마우스 움직임을 pane까지 넘겨 준다(2026-10-08 실측: 5초 동안 움직임 이벤트 138개). 앱은 이미 버튼 없이 움직여도 알려 주는 모드(1003)를 켜고 있다. 지금은 그 이벤트를 버린다(`keys::mouse`).
+
+- **대상**: 지금 클릭으로 동작하는 곳 전부다. 목록 줄, 상세의 관계 줄, 메뉴 항목, 탭 이름.
+- **표시**: 마우스가 올라간 줄(탭은 그 이름)을 옅은 배경 `HOVER_BG = Rgb(35, 35, 46)`으로 칠한다. 글자색은 바꾸지 않는다. `SELECTED_BG(45, 45, 60)`와 같은 계열이고 더 옅다.
+- **우선순위**: 키보드로 고른 줄(`▶`, `SELECTED_BG`)이 hover보다 우선이다. 메뉴가 열려 있으면 메뉴에 가려진 목록·상세는 밝아지지 않는다(맨 위에 그린 대상만 잡는 지금 클릭 규칙과 같다).
+- **지우기**: 마우스가 대상 밖으로 나가면 지운다. 마우스 움직임이 아닌 입력(키, 휠, 클릭, 붙여넣기)이 오면 지우고, 다음 움직임 때 다시 잡는다.
+- **선택과 따로**: hover는 선택한 줄이나 미리보기를 바꾸지 않는다. 클릭은 지금처럼 동작한다.
+- **다시 그리기**: 움직임 이벤트는 초당 수십 개라서, hover 대상이 바뀔 때만 다시 그린다(6장).
+
+## 6. 다시 그리기 (팝업·사이드 공통)
 
 지금은 가만히 있어도 50ms마다 다시 그린다(2부 후속 N10). 이를 바꿔서 아래 경우에만 그린다.
 
-- 키·마우스·붙여넣기 입력이나 터미널 크기 변화를 처리했을 때
+- 키·마우스·붙여넣기 입력이나 터미널 크기 변화를 처리했을 때. 마우스 움직임은 hover 대상이 바뀔 때만 센다
 - 네트워크 응답, 앱의 할 일(`Effect`), 앱에 알린 결과(`Msg`)를 처리했을 때
 - 마지막으로 그린 지 1초가 지났을 때. 상단 "n분 전 갱신"이 바뀌고 3초·10초 안내가 사라지게 한다
 
 입력을 기다리는 간격(50ms)은 그대로라서 반응 속도는 같다.
 
-## 6. herdr 연결
+## 7. herdr 연결
 
-### 6.1 매니페스트
+### 7.1 매니페스트
 
 ```toml
 [[actions]]
@@ -131,7 +143,7 @@ placement = "split"
 command = ["./target/release/herdr-linear", "ui", "--mode", "side"]
 ```
 
-### 6.2 열고 닫기 (`open side`)
+### 7.2 열고 닫기 (`open side`)
 
 1. **워크스페이스 id**: `HERDR_WORKSPACE_ID`를 쓴다. 없으면 컨텍스트의 `focused_pane_id`로 `herdr pane get`을 불러 `workspace_id`를 읽는다.
 2. **기록 찾기**: 상태 디렉터리의 `side-panes.json`(`{ "<workspace_id>": "<pane_id>" }`)에서 그 워크스페이스의 pane을 찾는다.
@@ -139,18 +151,18 @@ command = ["./target/release/herdr-linear", "ui", "--mode", "side"]
 4. **열기**: 기록이 없거나 그 pane이 이미 없으면(남은 기록은 지운다) 새로 연다. `herdr plugin pane open --plugin jh.linear --entrypoint side --placement split --direction right --focus`에 팝업과 같은 `--env`(원래 pane의 맥락)를 붙인다.
 5. **실패**: 팝업처럼 로그에 남기고 herdr 알림으로 알린다.
 
-### 6.3 사이드 프로세스 (`ui --mode side`)
+### 7.3 사이드 프로세스 (`ui --mode side`)
 
 - 팝업과 같은 준비를 한 뒤 앱을 사이드 모드로 시작한다. 준비는 설정·키·캐시·원래 pane 맥락을 읽는 것이다.
 - **기록**:
   - 시작할 때 자기 pane id와 워크스페이스 id를 `side-panes.json`에 적는다. pane id는 `HERDR_PANE_ID`, 없으면 `herdr pane current`로 얻는다. 워크스페이스 id는 `HERDR_WORKSPACE_ID`, 없으면 `herdr pane current`로 얻는다.
   - 정상 종료할 때는 자기 기록만 지운다.
-  - 비정상 종료로 남은 기록은 6.2의 3번에서 걸러진다.
+  - 비정상 종료로 남은 기록은 7.2의 3번에서 걸러진다.
 - **기록 파일 쓰기**: 쓸 때마다 통째로 다시 쓴다(임시 파일에 쓰고 이름 바꾸기). 읽지 못하거나 모양이 틀리면 빈 기록으로 본다. 두 프로세스가 동시에 쓰는 경우는 드물어서 잠금은 두지 않는다.
 
-### 6.4 구현 초기에 확인할 가정
+### 7.4 구현 초기에 확인할 가정
 
-아래는 실제 herdr에서 pane을 열어 봐야 알 수 있다. 사용자의 herdr 화면에 pane이 열리므로 사용자와 함께 확인한다.
+아래는 실제 herdr에서 pane을 열어 봐야 알 수 있다. 사용자의 herdr 화면에 pane이 열리므로 마지막 수동 확인 때 사용자와 함께 확인한다. 그 전까지는 "다를 때" 칸의 대체 경로까지 함께 구현해, 가정이 틀려도 동작하게 한다.
 
 | 가정 | 확인 방법 | 다를 때 |
 |---|---|---|
@@ -159,25 +171,28 @@ command = ["./target/release/herdr-linear", "ui", "--mode", "side"]
 | 사이드 프로세스가 끝나면 herdr가 그 pane을 닫는다 | `q`로 끝내 본다 | 끝나기 직전에 `herdr pane close <자기 pane>`을 부른다 |
 | 닫힌 pane에는 `herdr pane get`이 실패한다 | 닫은 뒤 불러 본다 | `herdr pane list`에서 찾는다 |
 | `herdr plugin pane close`가 사이드 pane을 닫는다 | 실제로 불러 본다 | `herdr pane close`를 쓴다 |
+| herdr가 마우스 움직임을 pane까지 넘긴다 | 확인함(2026-10-08, 5초에 138개) | — |
 
-## 7. 코드
+## 8. 코드
 
 | 파일 | 바뀌는 것 |
 |---|---|
-| `herdr-plugin.toml` | 6.1의 액션·pane |
+| `herdr-plugin.toml` | 7.1의 액션·pane |
 | `src/ui/row.rs` | 목록 줄의 우선순위 막대 칸(4장) |
 | `src/ui/style.rs` | 우선순위 → 막대 칸 스팬(색 있는 줄과 색 없는 글자가 같은 규칙을 쓰게) |
 | `src/cli.rs` | `OpenTarget::Side`, `UiMode::Side`, 실행 분기, 색을 끈 목록 줄(`issue_line`)의 우선순위 칸 |
 | `src/herdr.rs` | `open_pane`에 배치(split·방향) 인자, `pane get`·`pane current`·`plugin pane close` 호출, `open side` 흐름 |
 | `src/side.rs` (새 파일) | `side-panes.json` 읽기·쓰기·지우기(워크스페이스 → pane) |
 | `src/tui/mod.rs` | `side(paths)` 진입점: 준비, 기록, 사이드 모드 앱, 종료 때 기록 지우기 |
-| `src/tui/app.rs` | 사이드 모드 표시, 목록 모드 Esc, `tick`의 자동 새로고침, `r`이 다음 자동 새로고침을 미룸 |
-| `src/tui/runtime.rs` | 다시 그릴지 판단하는 함수와 이벤트 루프 |
-| README·ROADMAP·바탕 스펙 | 9장 |
+| `src/tui/app.rs` | 사이드 모드 표시, 목록 모드 Esc, `tick`의 자동 새로고침, `r`이 다음 자동 새로고침을 미룸, hover 상태(`Input::Hover`), 누를 수 있는 대상 `Target`(view에서 옮겨 와 view·keys가 다시 내보냄) |
+| `src/tui/keys.rs` | 마우스 움직임 → `Input::Hover(대상 또는 없음)` |
+| `src/tui/view.rs` | hover 배경(목록 줄·관계 줄·메뉴 항목·탭 이름), `HOVER_BG` |
+| `src/tui/runtime.rs` | 다시 그릴지 판단하는 함수와 이벤트 루프(hover 대상이 같은 움직임은 건너뜀) |
+| README·ROADMAP·바탕 스펙 | 10장 |
 
 설정 `[side] refresh_seconds`는 이미 읽고 검사한다(`Settings::side_refresh_seconds`).
 
-## 8. 테스트
+## 9. 테스트
 
 | 대상 | 내용 |
 |---|---|
@@ -188,6 +203,8 @@ command = ["./target/release/herdr-linear", "ui", "--mode", "side"]
 | `herdr` | 가짜 herdr 스크립트로 확인한다.<br>• 기록 없음 → `plugin pane open` 인자(`--placement split --direction right --focus`, `--env`)<br>• 살아 있는 기록 → `plugin pane close` 후 기록 삭제<br>• 죽은 기록 → 기록 삭제 후 열기<br>• 워크스페이스 id를 `pane get`으로 얻기 |
 | `cli` | `open side`, `ui --mode side` 해석 (지금의 "`open side`는 오류" 테스트를 바꾼다) |
 | `tui::runtime` | 다시 그릴지 판단: 바뀐 게 있으면 그리고, 없으면 1초가 지난 뒤에만 그린다 |
+| `tui::keys` | 대상 위 움직임 → `Hover(Some)`, 빈 곳 → `Hover(None)` |
+| `tui::view` | hover한 목록 줄·메뉴 항목·관계 줄·탭에 `HOVER_BG`, 고른 줄은 hover돼도 `SELECTED_BG`, 메뉴에 가려진 줄은 밝아지지 않음 |
 
 `tui::app`에서 확인할 것:
 - 사이드 모드에서 목록 모드 Esc로는 끝나지 않고 `q`로 끝난다. 팝업 모드는 지금처럼 Esc로 끝난다.
@@ -198,6 +215,7 @@ command = ["./target/release/herdr-linear", "ui", "--mode", "side"]
 - 대기 중이거나 멈춤 시각 전이거나 키 입력 화면이면 건너뛴다.
 - 0이면 끈다. `r`을 누르면 다음 자동 새로고침이 미뤄진다.
 - 요청 회계(`loading`)가 맞는다.
+- `Hover`가 hover 대상을 바꾸고, 키·휠·클릭이 지우고, 선택은 바꾸지 않는다.
 
 수동 확인은 herdr에서 한다.
 - 키로 열고 닫기, Esc로 닫히지 않음, `q`로 닫은 뒤 다시 열기
@@ -205,12 +223,14 @@ command = ["./target/release/herdr-linear", "ui", "--mode", "side"]
 - 상세를 열어 둔 채 Linear에서 상태를 바꾸면 1분 안에 바뀌는지
 - 가만히 둘 때 CPU가 거의 0%인지(활동 모니터나 `top`)
 - 팝업과 함께 쓰기
+- 마우스를 올린 줄이 옅게 밝아지는지(목록·관계 줄·메뉴·탭)
 
-## 9. 문서·버전
+## 10. 문서·버전
 
 - README(영어·한국어)
   - 사이드 pane 소개
   - 목록의 우선순위 막대
+  - 마우스를 올린 줄 밝히기
   - 키 설정 예시 두 개
   - `[side] refresh_seconds` 설정
   - 문제 해결: 사이드 pane이 열리지 않거나 닫히지 않을 때
