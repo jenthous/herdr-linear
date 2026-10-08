@@ -1,6 +1,7 @@
 //! Linear의 색과 상태를 터미널 스타일로 바꾼다.
 
 use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::Span;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::linear::types::{LabelRef, StateRef};
@@ -65,6 +66,55 @@ pub fn priority_label(p: i64) -> &'static str {
         3 => "보통",
         4 => "낮음",
         _ => "없음",
+    }
+}
+
+/// 우선순위 막대. 높음은 셋, 보통은 둘, 낮음은 하나를 밝힌다.
+const BARS: [&str; 3] = ["▂", "▄", "▆"];
+
+/// 밝힐 막대 수. 긴급은 막대 대신 `!`라서 `None`, 없음·모르는 값은 0.
+fn lit_bars(p: i64) -> Option<usize> {
+    match p {
+        1 => None,
+        2 => Some(3),
+        3 => Some(2),
+        4 => Some(1),
+        _ => Some(0),
+    }
+}
+
+/// 목록 줄의 우선순위 칸(3칸). 긴급은 빨간 `!`, 높음·보통·낮음은 막대를 밝히고 나머지는 흐리게,
+/// 없음은 빈칸이다.
+pub fn priority_spans(p: i64) -> Vec<Span<'static>> {
+    match lit_bars(p) {
+        None => vec![
+            Span::raw(" "),
+            Span::styled(
+                "!",
+                Style::new().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+        ],
+        Some(0) => vec![Span::raw("   ")],
+        Some(lit) => BARS
+            .iter()
+            .enumerate()
+            .map(|(i, bar)| {
+                if i < lit {
+                    Span::raw(*bar)
+                } else {
+                    Span::styled(*bar, DIM)
+                }
+            })
+            .collect(),
+    }
+}
+
+/// 색 없는 출력의 우선순위 칸(3칸). 흐린 막대 자리는 빈칸이다.
+pub fn priority_text(p: i64) -> String {
+    match lit_bars(p) {
+        None => " ! ".to_string(),
+        Some(lit) => format!("{:<3}", BARS[..lit].concat()),
     }
 }
 
@@ -145,5 +195,40 @@ mod tests {
         assert_eq!(truncate("abcdef", 4), "abc…");
         assert_eq!(truncate("abc", 0), "");
         assert!(truncate("가나다라마바", 7).width() <= 7);
+    }
+
+    /// 우선순위 칸의 (글자, 스타일).
+    fn cells(p: i64) -> Vec<(char, Style)> {
+        priority_spans(p)
+            .iter()
+            .flat_map(|s| s.content.chars().map(move |c| (c, s.style)))
+            .collect()
+    }
+
+    #[test]
+    fn priority_bars_light_up_by_level() {
+        let plain = Style::new();
+        let red = Style::new().fg(Color::Red).add_modifier(Modifier::BOLD);
+        assert_eq!(cells(1), vec![(' ', plain), ('!', red), (' ', plain)]);
+        assert_eq!(cells(2), vec![('▂', plain), ('▄', plain), ('▆', plain)]);
+        assert_eq!(cells(3), vec![('▂', plain), ('▄', plain), ('▆', DIM)]);
+        assert_eq!(cells(4), vec![('▂', plain), ('▄', DIM), ('▆', DIM)]);
+        for p in [0, 5, -1] {
+            assert_eq!(cells(p), vec![(' ', plain); 3], "{p}");
+        }
+    }
+
+    #[test]
+    fn plain_priority_bars_keep_three_columns() {
+        assert_eq!(priority_text(1), " ! ");
+        assert_eq!(priority_text(2), "▂▄▆");
+        assert_eq!(priority_text(3), "▂▄ ");
+        assert_eq!(priority_text(4), "▂  ");
+        assert_eq!(priority_text(0), "   ");
+        for p in -1..=5 {
+            assert_eq!(priority_text(p).width(), 3, "{p}");
+            let spans: usize = priority_spans(p).iter().map(Span::width).sum();
+            assert_eq!(spans, 3, "{p}");
+        }
     }
 }

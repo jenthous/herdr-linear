@@ -20,8 +20,8 @@ use crate::search::rank::{SearchIndex, merge, sort_mine};
 use crate::store::{Store, remove_db_files};
 use crate::ui::relations;
 use crate::ui::row::issue_row;
-use crate::ui::style::local_time;
 pub use crate::ui::style::{ago, priority_label, state_icon};
+use crate::ui::style::{local_time, priority_text};
 
 /// 내 정보(viewer)를 다시 받는 간격.
 pub const VIEWER_TTL_MS: i64 = 60 * 60 * 1000;
@@ -556,9 +556,10 @@ fn api_error(ctx: &Ctx, e: ApiError) -> anyhow::Error {
 
 pub fn issue_line(issue: &Issue) -> String {
     let mut s = format!(
-        "{} {:<9} {}",
+        "{} {:<9} {} {}",
         state_icon(&issue.state.state_type),
         issue.identifier,
+        priority_text(issue.priority),
         issue.title
     );
     let labels = issue.label_names();
@@ -845,7 +846,7 @@ mod tests {
         );
         let (_d, ctx) = test_ctx(url(&server));
         let out = mine(&ctx).unwrap();
-        assert_eq!(out, "◐ ENG-1     진행 중  [bug]\n○ ENG-2     할 일");
+        assert_eq!(out, "◐ ENG-1         진행 중  [bug]\n○ ENG-2         할 일");
         let (saved, _) = ctx.store.get_view("mine").unwrap().unwrap();
         assert_eq!(
             saved
@@ -906,8 +907,8 @@ mod tests {
             )
             .unwrap();
         let out = search(&ctx, "로그인", false).unwrap();
-        assert!(out.contains("ENG-1     로그인 버튼"), "{out}");
-        assert!(out.contains("OPS-9     로그인 서버"), "{out}");
+        assert!(out.contains("ENG-1         로그인 버튼"), "{out}");
+        assert!(out.contains("OPS-9         로그인 서버"), "{out}");
         m.assert();
         // 서버 결과는 캐시에 저장된다
         assert!(ctx.store.get_issue("ENG-1").unwrap().is_some());
@@ -1161,7 +1162,10 @@ mod tests {
         let issue = IssueBuilder::new("i1", "ENG-1", "로그인\u{1b}[2J 버그")
             .assignee("u1", "민수\u{1b}]0;x\u{7}")
             .build();
-        assert_eq!(issue_line(&issue), "○ ENG-1     로그인[2J 버그  @민수]0;x");
+        assert_eq!(
+            issue_line(&issue),
+            "○ ENG-1         로그인[2J 버그  @민수]0;x"
+        );
         let (_d, ctx) = test_ctx(OFFLINE.into());
         trust_cache(&ctx);
         ctx.store.upsert_issues(&[issue], NOW).unwrap();
@@ -1468,5 +1472,16 @@ mod tests {
         );
         with_relations.assert();
         without_relations.assert();
+    }
+
+    #[test]
+    fn plain_list_line_shows_priority_bars() {
+        let line =
+            |p: i64| issue_line(&IssueBuilder::new("i1", "ENG-1", "제목").priority(p).build());
+        assert_eq!(line(1), "○ ENG-1      !  제목");
+        assert_eq!(line(2), "○ ENG-1     ▂▄▆ 제목");
+        assert_eq!(line(3), "○ ENG-1     ▂▄  제목");
+        assert_eq!(line(4), "○ ENG-1     ▂   제목");
+        assert_eq!(line(0), "○ ENG-1         제목");
     }
 }
