@@ -23,14 +23,16 @@
 ## Requirements
 
 - herdr 0.9.3 or later
-- Rust 1.88 or later (herdr builds the plugin from source when you install it)
-- macOS or Linux
+- macOS (Apple Silicon or Intel) or Linux (x86_64 or arm64), with `bash` and `curl` (preinstalled on macOS and most Linux distributions)
+- Rust 1.88 or later, only when no prebuilt binary can be used (another platform, or the download fails). The plugin is then built from source.
 
 ## Install
 
 ```sh
 herdr plugin install jenthous/herdr-linear
 ```
+
+On macOS and Linux this downloads a prebuilt binary from GitHub Releases and checks its SHA-256 checksum. If that isn't possible, it builds from source with Cargo.
 
 Plugins can't register keys themselves. Add a binding to `~/.config/herdr/config.toml`:
 
@@ -140,6 +142,8 @@ cargo clippy --all-targets -- -D warnings
 scripts/deploy-local.sh   # build and link a stable copy for daily use on this machine
 ```
 
+To release, bump `version` in `Cargo.toml` and `herdr-plugin.toml` (Cargo updates `Cargo.lock`), commit, and push the tag `vX.Y.Z` first. When the release workflow has attached the binaries and checksums, push `main`.
+
 ---
 
 # 한국어
@@ -165,14 +169,16 @@ scripts/deploy-local.sh   # build and link a stable copy for daily use on this m
 ## 필요한 것
 
 - herdr 0.9.3 이상
-- Rust 1.88 이상 (설치할 때 herdr가 소스를 빌드해요)
-- macOS 또는 Linux
+- macOS(Apple Silicon·Intel) 또는 Linux(x86_64·arm64), 그리고 `bash`·`curl`(macOS와 대부분의 Linux에 기본으로 있어요)
+- Rust 1.88 이상은 미리 빌드한 바이너리를 쓸 수 없을 때만 필요해요(다른 플랫폼이거나 받기에 실패할 때). 그때는 소스로 빌드해요.
 
 ## 설치
 
 ```sh
 herdr plugin install jenthous/herdr-linear
 ```
+
+macOS·Linux에서는 GitHub Releases에서 미리 빌드한 바이너리를 받아 SHA-256 체크섬을 확인해요. 그게 안 되면 Cargo로 소스를 빌드해요.
 
 플러그인은 키를 직접 등록할 수 없어서 `~/.config/herdr/config.toml`에 추가해요.
 
@@ -279,6 +285,8 @@ cargo test
 cargo clippy --all-targets -- -D warnings
 scripts/deploy-local.sh   # 이 기기에서 매일 쓸 복사본을 빌드해 herdr에 연결
 ```
+
+릴리스는 `Cargo.toml`과 `herdr-plugin.toml`의 `version`을 올려(`Cargo.lock`은 Cargo가 맞춰요) 커밋하고, `vX.Y.Z` 태그를 먼저 push해요. 릴리스 워크플로가 바이너리와 체크섬을 올리면 그다음에 `main`을 push해요.
 
 `scripts/deploy-local.sh`는 빌드한 플러그인을 `~/.local/share/herdr-linear/plugin`에 복사해 herdr에 연결하고, `herdr-linear` 명령을 `~/.local/bin`에 연결해요. 그 뒤로는 저장소에서 개발해도 쓰고 있는 플러그인이 바뀌지 않아요.
 

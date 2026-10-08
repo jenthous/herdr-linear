@@ -57,8 +57,9 @@ min_herdr_version = "0.9.3"
 description = "Fast Linear lookup in herdr: search, read, triage, and hand issues to agents."
 platforms = ["macos", "linux"]
 
+# 미리 빌드한 바이너리를 받고, 안 되면 cargo로 빌드한다(2026-10-09-prebuilt-binaries-design.md)
 [[build]]
-command = ["cargo", "build", "--release"]
+command = ["bash", "scripts/install.sh"]
 
 [[actions]]
 id = "palette"
