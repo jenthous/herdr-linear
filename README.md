@@ -142,7 +142,7 @@ cargo clippy --all-targets -- -D warnings
 scripts/deploy-local.sh   # build and link a stable copy for daily use on this machine
 ```
 
-To release, bump `version` in `Cargo.toml` and `herdr-plugin.toml` (Cargo updates `Cargo.lock`), commit, and push the tag `vX.Y.Z` first. When the release workflow has attached the binaries and checksums, push `main`.
+To release, bump `version` in `Cargo.toml` and `herdr-plugin.toml`, run `cargo test` so Cargo updates `Cargo.lock`, commit, and push the tag `vX.Y.Z` first. When the release workflow has attached the binaries and checksums, push `main`.
 
 ---
 
@@ -286,9 +286,9 @@ cargo clippy --all-targets -- -D warnings
 scripts/deploy-local.sh   # 이 기기에서 매일 쓸 복사본을 빌드해 herdr에 연결
 ```
 
-릴리스는 `Cargo.toml`과 `herdr-plugin.toml`의 `version`을 올려(`Cargo.lock`은 Cargo가 맞춰요) 커밋하고, `vX.Y.Z` 태그를 먼저 push해요. 릴리스 워크플로가 바이너리와 체크섬을 올리면 그다음에 `main`을 push해요.
-
 `scripts/deploy-local.sh`는 빌드한 플러그인을 `~/.local/share/herdr-linear/plugin`에 복사해 herdr에 연결하고, `herdr-linear` 명령을 `~/.local/bin`에 연결해요. 그 뒤로는 저장소에서 개발해도 쓰고 있는 플러그인이 바뀌지 않아요.
+
+릴리스는 `Cargo.toml`과 `herdr-plugin.toml`의 `version`을 올리고 `cargo test`를 돌려 `Cargo.lock`도 맞춘 뒤 커밋하고, `vX.Y.Z` 태그를 먼저 push해요. 릴리스 워크플로가 바이너리와 체크섬을 올리면 그다음에 `main`을 push해요.
 
 ## 라이선스
 

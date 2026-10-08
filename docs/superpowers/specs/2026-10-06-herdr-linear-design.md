@@ -655,7 +655,7 @@ tests/
 
 - **공개**
   - GitHub 저장소(`jenthous/herdr-linear` 또는 다른 이름)
-  - 릴리스 바이너리와 체크섬. `[[build]]`는 바이너리를 받아오고, 실패하면 cargo로 빌드한다.
+  - 릴리스 바이너리와 체크섬. `[[build]]`는 바이너리를 받아오고, 실패하면 cargo로 빌드한다. (v0.2.1에 완료: `docs/superpowers/specs/2026-10-09-prebuilt-binaries-design.md`)
   - herdr 마켓플레이스 등록
 - **기능**
   - 에이전트 작업 결과를 Linear 코멘트·상태에 반영

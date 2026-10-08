@@ -37,6 +37,7 @@
 - List rows show priority as a colored P0–P3 label in the palette, the side pane, and the CLI.
 - Whatever you can click lights up under the mouse pointer.
 - The screen is redrawn only when something changes, and otherwise once a second, so an idle pane uses almost no CPU.
+- v0.2.1: prebuilt binaries for macOS and Linux with SHA-256 checksums on GitHub Releases, so installing doesn't need Rust. Building from source stays as the fallback.
 
 ## 🔜 v0.3 — actions and agent handoff (next)
 
@@ -49,7 +50,6 @@
 
 ## Later
 
-- Prebuilt binaries with checksums on GitHub Releases, so installing doesn't need Rust. Building from source stays as the fallback.
 - Report agent results back to Linear as comments and status changes
 - Create a git worktree from an issue
 - Korean initial-consonant (초성) search
@@ -107,6 +107,7 @@
 - 목록 줄에 우선순위를 색깔 있는 P0~P3 라벨로 보여 줘요. 팔레트, 사이드 pane, CLI 모두 같아요.
 - 누를 수 있는 곳에 마우스를 올리면 옅게 밝아져요.
 - 바뀐 게 있을 때와 1초에 한 번만 다시 그려서, 가만히 둔 pane은 CPU를 거의 쓰지 않아요.
+- v0.2.1: macOS·Linux용 미리 빌드한 바이너리와 SHA-256 체크섬을 GitHub Releases에 올려서 Rust 없이도 설치돼요. 소스 빌드는 대체 수단으로 남아요.
 
 ## 🔜 v0.3 — 변경 동작과 에이전트 전달 (다음)
 
@@ -119,7 +120,6 @@
 
 ## 나중에
 
-- GitHub Releases에 미리 빌드한 바이너리와 체크섬을 올려서, Rust 없이도 설치되게 해요. 소스 빌드는 대체 수단으로 남겨요.
 - 에이전트 작업 결과를 Linear 코멘트·상태에 반영해요.
 - 이슈에서 git worktree를 만들어요.
 - 초성 검색
