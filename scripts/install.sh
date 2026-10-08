@@ -7,7 +7,7 @@ set -euo pipefail
 
 name="herdr-linear"
 # herdr가 빌드 명령에 주는 작업 폴더·환경에 기대지 않고 스크립트 위치에서 플러그인 루트를 구한다
-root="$(cd "$(dirname "$0")/.." && pwd)"
+root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 dest="$root/target/release/$name"
 releases="${HERDR_LINEAR_RELEASES:-https://github.com/jenthous/herdr-linear/releases/download}"
 retry_seconds="${HERDR_LINEAR_RETRY_SECONDS:-3}"

@@ -228,6 +228,31 @@ fn archive_without_the_binary_falls_back_to_cargo() {
 }
 
 #[test]
+fn runs_like_herdr_from_the_plugin_root_even_with_cdpath() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = plugin_root(dir.path(), "9.9.9");
+    let releases = release(dir.path(), "9.9.9", "herdr-linear", None);
+    // herdr는 플러그인 루트에서 `bash scripts/install.sh`로 돌린다. CDPATH가 있어도 루트를 찾는다
+    let out = Command::new("/bin/bash")
+        .arg("scripts/install.sh")
+        .current_dir(&root)
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("HOME", dir.path())
+        .env("CDPATH", ".")
+        .env(
+            "HERDR_LINEAR_RELEASES",
+            format!("file://{}", releases.display()),
+        )
+        .env("HERDR_LINEAR_TARGET", TARGET)
+        .env("HERDR_LINEAR_RETRY_SECONDS", "0")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(installed(&root), "fake-release");
+}
+
+#[test]
 fn failed_install_keeps_the_existing_binary() {
     let dir = tempfile::tempdir().unwrap();
     let root = plugin_root(dir.path(), "9.9.9");
