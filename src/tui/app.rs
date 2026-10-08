@@ -314,6 +314,12 @@ pub struct App {
     /// (경고 문구, 보여줄 마지막 시각)
     pub warning: Option<(String, i64)>,
     pub quit: bool,
+    /// 사이드 pane으로 떠 있다. 목록 모드 Esc로 닫지 않는다
+    pub side: bool,
+    /// 사이드 pane의 자동 새로고침 주기(ms). 없으면 하지 않는다
+    refresh_every: Option<i64>,
+    /// 다음 자동 새로고침 시각. 첫 `tick`에서 정한다
+    refresh_due: Option<i64>,
     pub viewer: Option<Viewer>,
     index: SearchIndex,
     tabs: [TabData; 3],
@@ -349,6 +355,9 @@ impl App {
             flash: None,
             warning: None,
             quit: false,
+            side: false,
+            refresh_every: None,
+            refresh_due: None,
             viewer: None,
             index: SearchIndex::new(Vec::new()),
             tabs: Default::default(),
@@ -382,6 +391,14 @@ impl App {
             effects.push(Effect::OpenDetail(id));
         }
         (app, effects)
+    }
+
+    /// 사이드 pane으로 쓴다. `refresh_seconds`마다 지금 보이는 것을 다시 받는다 (0이면 하지 않는다).
+    pub fn into_side(mut self, refresh_seconds: u64) -> App {
+        self.side = true;
+        self.refresh_every =
+            (refresh_seconds > 0).then(|| refresh_seconds.min(86_400) as i64 * 1_000);
+        self
     }
 
     /// 키 입력 화면으로 시작한다. `env_invalid`면 환경 변수 키가 틀렸다는 안내만 보인다.
@@ -590,7 +607,10 @@ impl App {
                 Vec::new()
             }
             Input::Esc => {
-                self.quit = true;
+                // 사이드 pane은 Esc로 닫지 않는다. q나 열고 닫는 키로 닫는다
+                if !self.side {
+                    self.quit = true;
+                }
                 Vec::new()
             }
             Input::Act(a) => self.act(a, now),
@@ -939,21 +959,11 @@ impl App {
                 }
             }
             Act::Refresh => {
-                if self.mode == Mode::Detail {
-                    if let Some(d) = self.detail.as_mut() {
-                        d.loading = true;
-                        self.loading += 1;
-                        return vec![Effect::OpenDetail(d.id.clone())];
-                    }
-                    return Vec::new();
+                // 손으로 새로고침하면 다음 자동 새로고침은 지금부터 한 주기 뒤다
+                if let Some(every) = self.refresh_every {
+                    self.refresh_due = Some(now + every);
                 }
-                if !parse(&self.query).is_empty() {
-                    self.search_due = Some(now);
-                    self.paused_until = None;
-                    return Vec::new();
-                }
-                self.loading += 1;
-                vec![Effect::LoadTab(self.tab), Effect::ResolvePinned]
+                self.refresh(now)
             }
             Act::DeepSearch => {
                 if !parse(&self.query).has_text() {
@@ -995,8 +1005,53 @@ impl App {
         }
     }
 
-    /// 시간이 지나 할 일 (검색 디바운스).
+    /// 지금 보이는 것을 다시 받는다. 상세는 그 상세, 검색어가 있으면 서버 검색,
+    /// 그 밖에는 지금 탭과 현재 브랜치 이슈다.
+    fn refresh(&mut self, now: i64) -> Vec<Effect> {
+        if self.mode == Mode::Detail {
+            if let Some(d) = self.detail.as_mut() {
+                d.loading = true;
+                self.loading += 1;
+                return vec![Effect::OpenDetail(d.id.clone())];
+            }
+            return Vec::new();
+        }
+        if !parse(&self.query).is_empty() {
+            self.search_due = Some(now);
+            self.paused_until = None;
+            return Vec::new();
+        }
+        self.loading += 1;
+        vec![Effect::LoadTab(self.tab), Effect::ResolvePinned]
+    }
+
+    /// 시간이 지나 할 일: 사이드 pane의 자동 새로고침과 검색 디바운스.
     pub fn tick(&mut self, now: i64) -> Vec<Effect> {
+        let mut effects = self.auto_refresh(now);
+        effects.extend(self.debounced_search(now));
+        effects
+    }
+
+    /// 주기가 되면 `r`과 같이 새로고침한다. 앞 요청을 기다리는 중이거나, 한도로 자동 요청을
+    /// 멈췄거나, 키 입력 화면이면 이번 회차는 건너뛰고 다음 주기에 다시 본다.
+    fn auto_refresh(&mut self, now: i64) -> Vec<Effect> {
+        let Some(every) = self.refresh_every else {
+            return Vec::new();
+        };
+        let due = *self.refresh_due.get_or_insert(now + every);
+        if now < due {
+            return Vec::new();
+        }
+        self.refresh_due = Some(now + every);
+        let paused = self.paused_until.is_some_and(|until| now < until);
+        if self.mode == Mode::Onboarding || self.loading > 0 || paused {
+            return Vec::new();
+        }
+        self.refresh(now)
+    }
+
+    /// 입력이 멈춘 뒤 서버 검색을 보낸다.
+    fn debounced_search(&mut self, now: i64) -> Vec<Effect> {
         let Some(due) = self.search_due else {
             return Vec::new();
         };
@@ -2270,5 +2325,168 @@ mod tests {
             app.handle(input.clone(), T0);
             assert_eq!(app.hover, None, "{input:?}");
         }
+    }
+
+    fn tab_and_pinned(tab: Tab) -> Vec<Effect> {
+        vec![Effect::LoadTab(tab), Effect::ResolvePinned]
+    }
+
+    #[test]
+    fn side_pane_does_not_close_on_esc() {
+        let mut app = started().into_side(60);
+        app.handle(Input::Esc, T0);
+        assert_eq!(app.mode, Mode::List, "검색 → 목록");
+        app.handle(Input::Esc, T0);
+        assert!(!app.quit, "사이드 pane은 목록 모드 Esc로 닫히지 않는다");
+        app.handle(Input::Act(Act::Quit), T0);
+        assert!(app.quit, "q로 닫는다");
+        let mut ctrl_c = started().into_side(60);
+        ctrl_c.handle(Input::Quit, T0);
+        assert!(ctrl_c.quit, "Ctrl+C로 닫는다");
+        let mut popup = started();
+        popup.handle(Input::Esc, T0);
+        popup.handle(Input::Esc, T0);
+        assert!(popup.quit, "팝업은 지금처럼 Esc로 닫는다");
+    }
+
+    #[test]
+    fn side_pane_refreshes_the_list_every_period() {
+        let mut app = started().into_side(60);
+        app.handle(Input::Down, T0);
+        assert_eq!(app.selected, 1);
+        assert!(app.tick(T0).is_empty(), "시작하고 한 주기 뒤부터");
+        assert!(app.tick(T0 + 59_999).is_empty());
+        assert_eq!(app.tick(T0 + 60_000), tab_and_pinned(Tab::Mine));
+        assert_eq!(app.loading, 1);
+        assert!(
+            app.tick(T0 + 120_000).is_empty(),
+            "앞 요청이 안 끝났으면 건너뛴다"
+        );
+        app.apply(
+            tab_msg(
+                Tab::Mine,
+                vec![
+                    issue("a", "ENG-1", "로그인 버그"),
+                    issue("b", "ENG-2", "결제 화면"),
+                ],
+                true,
+            ),
+            T0 + 121_000,
+        );
+        assert_eq!(app.loading, 0);
+        assert_eq!(app.selected, 1, "고른 줄은 그대로");
+        assert!(
+            app.tick(T0 + 121_000).is_empty(),
+            "건너뛴 회차는 다음 주기에 다시 본다"
+        );
+        assert_eq!(app.tick(T0 + 180_000), tab_and_pinned(Tab::Mine));
+    }
+
+    #[test]
+    fn side_pane_refreshes_search_and_detail_too() {
+        // 검색어가 있으면 서버 검색을 다시 한다
+        let mut app = started().into_side(60);
+        assert!(app.tick(T0).is_empty());
+        type_str(&mut app, "로그인", T0);
+        let seq = searched(&app.tick(T0 + SEARCH_DEBOUNCE_MS), "로그인");
+        app.apply(
+            Msg::Search {
+                seq,
+                issues: Vec::new(),
+            },
+            T0 + 1_000,
+        );
+        let again = searched(&app.tick(T0 + 60_000), "로그인");
+        assert_ne!(again, seq, "새 요청으로 다시 찾는다");
+        // 상세는 그 상세를 다시 받고, 스크롤은 그대로다
+        let mut app = started().into_side(60);
+        assert!(app.tick(T0).is_empty());
+        assert_eq!(
+            app.handle(Input::Enter, T0),
+            vec![Effect::OpenDetail("a".into())]
+        );
+        let detail = || Msg::Detail {
+            id: "a".into(),
+            issue: issue("a", "ENG-1", "로그인 버그"),
+            comments: Vec::new(),
+            more: false,
+            relations: None,
+            fresh: true,
+        };
+        app.apply(detail(), T0 + 1_000);
+        app.set_detail_max_scroll(10);
+        app.handle(Input::Down, T0 + 2_000);
+        app.handle(Input::Down, T0 + 2_000);
+        assert_eq!(app.tick(T0 + 60_000), vec![Effect::OpenDetail("a".into())]);
+        assert_eq!(app.loading, 1);
+        app.apply(detail(), T0 + 61_000);
+        assert_eq!(app.loading, 0);
+        assert_eq!(app.detail.as_ref().unwrap().scroll, 2, "스크롤은 그대로");
+    }
+
+    #[test]
+    fn side_pane_skips_refresh_while_paused_or_turned_off() {
+        // 한도 때문에 자동 요청을 멈춘 동안은 건너뛴다
+        let mut app = started().into_side(60);
+        assert!(app.tick(T0).is_empty());
+        app.apply(Msg::Throttled(T0 + 90_000), T0);
+        assert!(app.tick(T0 + 60_000).is_empty(), "멈춤 시각 전");
+        assert_eq!(app.loading, 0);
+        assert_eq!(app.tick(T0 + 120_000), tab_and_pinned(Tab::Mine));
+        // 키 입력 화면에서는 하지 않는다
+        let mut onboarding = App::onboarding(false).into_side(60);
+        assert!(onboarding.tick(T0).is_empty());
+        assert!(onboarding.tick(T0 + 60_000).is_empty());
+        // 0이면 끄고, 팝업은 하지 않는다
+        for mut app in [started().into_side(0), started()] {
+            assert!(app.tick(T0).is_empty());
+            assert!(app.tick(T0 + 3_600_000).is_empty());
+        }
+    }
+
+    #[test]
+    fn manual_refresh_postpones_the_next_auto_refresh() {
+        let mut app = started().into_side(60);
+        assert!(app.tick(T0).is_empty());
+        app.handle(Input::Esc, T0);
+        assert_eq!(
+            app.handle(Input::Act(Act::Refresh), T0 + 50_000),
+            tab_and_pinned(Tab::Mine)
+        );
+        app.apply(
+            tab_msg(Tab::Mine, vec![issue("a", "ENG-1", "로그인 버그")], true),
+            T0 + 51_000,
+        );
+        assert!(
+            app.tick(T0 + 60_000).is_empty(),
+            "r을 누른 뒤 한 주기가 안 지났다"
+        );
+        assert_eq!(app.tick(T0 + 110_000), tab_and_pinned(Tab::Mine));
+    }
+
+    #[test]
+    fn failed_auto_refresh_tries_again_next_period() {
+        let mut app = started().into_side(60);
+        assert!(app.tick(T0).is_empty());
+        assert_eq!(app.tick(T0 + 60_000), tab_and_pinned(Tab::Mine));
+        app.apply(
+            Msg::Failed(ApiError::Offline("연결 안 됨".into())),
+            T0 + 61_000,
+        );
+        assert_eq!(app.loading, 0);
+        assert_eq!(app.tick(T0 + 120_000), tab_and_pinned(Tab::Mine));
+    }
+
+    #[test]
+    fn side_pane_starts_refreshing_after_the_key_is_accepted() {
+        let mut app = App::onboarding(false).into_side(60);
+        assert!(app.tick(T0).is_empty());
+        let effects = app.apply(Msg::KeyOk(viewer()), T0 + 1_000);
+        assert!(effects.contains(&Effect::LoadTab(Tab::Mine)), "{effects:?}");
+        app.apply(
+            tab_msg(Tab::Mine, vec![issue("a", "ENG-1", "로그인 버그")], true),
+            T0 + 2_000,
+        );
+        assert_eq!(app.tick(T0 + 60_000), tab_and_pinned(Tab::Mine));
     }
 }
