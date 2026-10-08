@@ -16,6 +16,14 @@ const TODO: State = ("Todo", "unstarted", "#e2e2e2");
 const BACKLOG: State = ("Backlog", "backlog", "#bec2c8");
 const DONE: State = ("Done", "completed", "#5e6ad2");
 
+/// 목록·관계 칸·상위 이슈에 함께 나오는 제목. 팔레트 목록(54칸)에서 `…`로 잘리지 않게 짧게 둔다.
+const SSO_TITLE: &str = "SSO for all apps";
+const CREDENTIALS_TITLE: &str = "Rotate DB passwords";
+const UPLOAD_TITLE: &str = "Session expires on upload";
+
+/// 현재 브랜치: 맨 위 이슈(ENG-142)의 제목으로 Linear가 만드는 이름. 셸 그림에도 쓴다.
+pub const BRANCH: &str = "alex/eng-142-login-loop-on-safari";
+
 fn parse<T: DeserializeOwned>(v: Value) -> T {
     serde_json::from_value(v).expect("fake data matches the Linear types")
 }
@@ -82,39 +90,33 @@ pub fn viewer() -> Viewer {
     }))
 }
 
+/// 상세 그림에 첫 코멘트까지 들어가도록 짧게 둔다 (문단·제목·목록·링크).
 const DESCRIPTION: &str =
-    "Users on Safari 17 get stuck in a redirect loop after signing in with SSO.
+    "Users on Safari 17 get stuck in a redirect loop after signing in with SSO. \
+See the [incident notes](https://example.com/incidents/42).
 
 ## Steps to reproduce
 1. Sign in with Google SSO on Safari
 2. Wait for the callback page
-3. The page reloads forever
-
-## Cause
-The `session_id` cookie is dropped because it is set with `SameSite=None` but without `Secure`.
-
-```js
-res.cookie(\"session_id\", id, { sameSite: \"none\", secure: true });
-```
-
-See the [incident notes](https://example.com/incidents/42).";
+3. The page reloads forever";
 
 /// 현재 브랜치에 연결된 이슈. 상세 화면도 이 이슈다.
 pub fn pinned() -> Issue {
     let mut v = issue(
         "ENG-142",
-        "Fix login redirect loop on Safari",
+        "Login loop on Safari",
         IN_PROGRESS,
         2,
         vec![label("bug", "#eb5757"), label("auth", "#4ea7fc")],
         "2026-10-01T10:12:00.000Z",
     );
     v["description"] = json!(DESCRIPTION);
+    v["branchName"] = json!(BRANCH);
     // 프로젝트·사이클·상위 줄이 팔레트 미리 보기(64칸)에 모든 언어에서 다 들어가게 짧게 둔다
     v["project"] = json!({ "id": "pj-sso", "name": "SSO" });
     v["cycle"] = json!({ "id": "cy-14", "number": 14.0, "name": null });
     v["parent"] = json!({
-        "id": "id-ENG-120", "identifier": "ENG-120", "title": "Single sign-on for all apps",
+        "id": "id-ENG-120", "identifier": "ENG-120", "title": SSO_TITLE,
         "state": state(IN_PROGRESS)
     });
     v["attachments"] = json!({ "nodes": [ {
@@ -126,13 +128,14 @@ pub fn pinned() -> Issue {
     parse(v)
 }
 
-/// "내 이슈" 탭.
+/// "내 이슈" 탭. 제목은 팔레트 목록(54칸) 한 줄에서 식별자·우선순위·라벨·담당자를 뺀
+/// 20~26칸 안에 들어가게 짧다. 길면 `…`로 잘려 그림이 지저분해진다.
 pub fn mine() -> Vec<Issue> {
     vec![
         pinned(),
         parse(issue(
             "ENG-139",
-            "Add rate limit headers to the public API",
+            "Add rate limit headers",
             IN_REVIEW,
             3,
             vec![label("api", "#4ea7fc")],
@@ -140,7 +143,7 @@ pub fn mine() -> Vec<Issue> {
         )),
         parse(issue(
             "ENG-131",
-            "Session expires during long uploads",
+            UPLOAD_TITLE,
             TODO,
             1,
             vec![label("bug", "#eb5757")],
@@ -148,7 +151,7 @@ pub fn mine() -> Vec<Issue> {
         )),
         parse(issue(
             "OPS-58",
-            "Rotate staging database credentials",
+            CREDENTIALS_TITLE,
             TODO,
             2,
             vec![label("security", "#f2994a")],
@@ -156,7 +159,7 @@ pub fn mine() -> Vec<Issue> {
         )),
         parse(issue(
             "ENG-120",
-            "Single sign-on for all apps",
+            SSO_TITLE,
             IN_PROGRESS,
             2,
             vec![label("epic", "#bb87fc")],
@@ -164,7 +167,7 @@ pub fn mine() -> Vec<Issue> {
         )),
         parse(issue(
             "ENG-127",
-            "Dark mode for the settings page",
+            "Dark mode for settings",
             BACKLOG,
             4,
             vec![label("design", "#bb87fc")],
@@ -180,7 +183,7 @@ pub fn mine() -> Vec<Issue> {
         )),
         parse(issue(
             "ENG-104",
-            "Document the webhook retry policy",
+            "Document webhook retries",
             BACKLOG,
             3,
             vec![label("docs", "#26b5ce")],
@@ -209,21 +212,13 @@ fn related(identifier: &str, title: &str, st: State) -> RelatedIssue {
 pub fn relations() -> IssueRelations {
     IssueRelations {
         children: vec![
-            related("ENG-143", "Add Safari to the end-to-end test matrix", DONE),
-            related("ENG-144", "Set Secure on all auth cookies", IN_PROGRESS),
-            related("ENG-145", "Regression test for the SSO callback", TODO),
+            related("ENG-143", "Add Safari to CI matrix", DONE),
+            related("ENG-144", "Set Secure on auth cookies", IN_PROGRESS),
+            related("ENG-145", "Test the SSO callback", TODO),
         ],
         more_children: false,
-        blocked_by: vec![related(
-            "OPS-58",
-            "Rotate staging database credentials",
-            TODO,
-        )],
-        blocking: vec![related(
-            "ENG-131",
-            "Session expires during long uploads",
-            TODO,
-        )],
+        blocked_by: vec![related("OPS-58", CREDENTIALS_TITLE, TODO)],
+        blocking: vec![related("ENG-131", UPLOAD_TITLE, TODO)],
         related: vec![related("ENG-97", "Cookie consent banner", DONE)],
     }
 }

@@ -1,4 +1,12 @@
-//! ratatui 화면 버퍼를 SVG로 바꾼다. 글자마다 x 좌표를 줘서 글꼴 폭과 상관없이 칸이 맞는다.
+//! ratatui 화면 버퍼를 SVG로 바꾼다. 칸 격자에 맞추려고 글꼴의 글자 폭에 기대지 않는다.
+//!
+//! - 한 칸 폭의 글자(영문·숫자·기호)는 스타일이 같은 것끼리 한 `<text>`로 묶고 글자마다 x를 준다.
+//!   브라우저는 x를 모두 따른다. 묶음 안의 빈칸은 한 칸까지만 넣는다.
+//! - 넓은 글자(한중일)는 글자마다 따로 `<text>`로 그린다. librsvg는 x 목록의 첫 값만 따라서
+//!   한 묶음에 두면 뒤의 글이 밀린다.
+//! - 상자 그리기 글자는 선으로, 고른 줄 표시 `▶`는 삼각형 경로로 그린다. 글꼴로 그리면
+//!   줄 사이가 끊기거나 이모지(색 있는 그림)로 바뀐다.
+//! - 그림 둘레에는 `PAD`만큼 여백을 둔다.
 
 use std::collections::BTreeMap;
 use std::fmt::Write;
@@ -13,6 +21,8 @@ const CW: u32 = 9;
 const CH: u32 = 20;
 const BASELINE: u32 = 15;
 const FONT_SIZE: u32 = 15;
+/// 그림 둘레의 여백(px). 화면이 그림 가장자리에 붙지 않게 한다.
+const PAD: u32 = 12;
 /// 넓은 글자(한중일)는 두 칸을 채우도록 크게 그린다. 칸 폭은 글자 크기의 0.6배인데
 /// 한중일 글꼴의 글자 폭은 1배라서, 그대로 두면 글자 사이가 벌어진다.
 const WIDE_FONT_SIZE: u32 = 17;
@@ -72,7 +82,7 @@ impl Cell {
 /// 버퍼들을 (가로 칸 위치, 버퍼)로 나란히 놓아 `w`×`h` 칸 SVG 하나로 만든다.
 pub fn render(parts: &[(u16, Buffer)], w: u16, h: u16, lang: Lang) -> String {
     let rows = compose(parts, w, h);
-    let (pw, ph) = (u32::from(w) * CW, u32::from(h) * CH);
+    let (pw, ph) = (u32::from(w) * CW + 2 * PAD, u32::from(h) * CH + 2 * PAD);
     let mut s = String::new();
     // `<text>` 안에는 빈칸이 이어지지 않아서(`texts`) 빈칸 처리 설정은 필요 없다
     let _ = writeln!(
@@ -81,24 +91,27 @@ pub fn render(parts: &[(u16, Buffer)], w: u16, h: u16, lang: Lang) -> String {
         lang.code(),
         fonts(lang)
     );
+    // 둥근 배경이 여백까지 덮고, 화면은 그 안쪽으로 옮겨 그린다
     let _ = writeln!(
         s,
         r#"<rect width="{pw}" height="{ph}" rx="8" fill="{BG}"/>"#
     );
+    let _ = writeln!(s, r#"<g transform="translate({PAD} {PAD})">"#);
     backgrounds(&mut s, &rows);
     box_lines(&mut s, &rows);
     markers(&mut s, &rows);
     texts(&mut s, &rows);
-    s.push_str("</svg>\n");
+    s.push_str("</g>\n</svg>\n");
     s
 }
 
 /// 고정폭 글꼴 다음에 그 언어의 한중일 글꼴을 둔다 (한자 모양이 언어마다 다르다).
+/// macOS, Windows, Noto(Linux) 순이다.
 fn fonts(lang: Lang) -> String {
     let cjk = match lang {
-        Lang::Ko => "'Apple SD Gothic Neo', 'Noto Sans CJK KR', 'Noto Sans KR', ",
-        Lang::Ja => "'Hiragino Sans', 'Noto Sans CJK JP', 'Noto Sans JP', ",
-        Lang::ZhCn => "'PingFang SC', 'Noto Sans CJK SC', 'Noto Sans SC', ",
+        Lang::Ko => "'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', 'Noto Sans KR', ",
+        Lang::Ja => "'Hiragino Sans', 'Yu Gothic', 'Meiryo', 'Noto Sans CJK JP', 'Noto Sans JP', ",
+        Lang::ZhCn => "'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC', ",
         Lang::En | Lang::De => "",
     };
     format!("ui-monospace, 'SF Mono', Menlo, Consolas, 'DejaVu Sans Mono', {cjk}monospace")
@@ -169,7 +182,8 @@ fn color(c: Color) -> Option<String> {
         Color::Magenta | Color::LightMagenta => "#f5c2e7",
         Color::Cyan | Color::LightCyan => "#94e2d5",
         Color::Gray => "#bac2de",
-        Color::DarkGray => "#6c7086",
+        // 흐린 글자(탭·상태·안내·메타 줄)도 읽히게 한다: 배경 #1e1e2e 위에서 5.8:1 (이전 #6c7086은 3.4:1)
+        Color::DarkGray => "#9399b2",
         Color::White => "#ffffff",
     };
     Some(hex.to_string())
@@ -298,7 +312,11 @@ fn texts(s: &mut String, rows: &[Vec<Cell>]) {
                 loop {
                     let gap = usize::from(row.get(k).is_some_and(|c| c.sym == " "));
                     let next = k + gap;
-                    if next >= row.len() || !flows(row, next) || !row[next].same_text_style(first) {
+                    let joins = next < row.len()
+                        && flows(row, next)
+                        && row[next].same_text_style(first)
+                        && (gap == 0 || blank_joins(&row[k], first));
+                    if !joins {
                         break;
                     }
                     if gap == 1 {
@@ -327,6 +345,16 @@ fn texts(s: &mut String, rows: &[Vec<Cell>]) {
             );
             x = k;
         }
+    }
+}
+
+/// 묶음 안에 빈칸 한 칸을 넣어도 되는지. 묶음이 밑줄·취소선을 쓰면 그 빈칸에도 같은 스타일이 있어야 한다
+/// (아니면 줄이 없던 빈칸에 줄이 그어진다). 줄이 없는 묶음이면 줄이 없는 빈칸이면 된다.
+fn blank_joins(blank: &Cell, run: &Cell) -> bool {
+    if run.underline || run.strike {
+        blank.same_text_style(run)
+    } else {
+        !blank.underline && !blank.strike
     }
 }
 

@@ -87,6 +87,7 @@ fn palette() -> Buffer {
 
 /// 사이드 pane: 작업 옆에 목록 모드로 띄워 둔 모습.
 fn side() -> Buffer {
+    // 60은 자동 새로고침 주기(초)이지 폭이 아니다. 여기서는 `tick`을 부르지 않아 새로고침은 일어나지 않는다
     let mut app = started().into_side(60);
     app.handle(Input::Esc, data::NOW);
     draw(&app, W - SHELL_W, H)
@@ -123,9 +124,11 @@ fn shell() -> Buffer {
     let prompt = Style::new().fg(Color::Cyan);
     let dim = Style::new().fg(Color::DarkGray);
     let ok = Style::new().fg(Color::Green);
+    // 현재 브랜치는 맨 위 이슈(ENG-142)에 연결된 것이다
+    let cwd = format!(" ~/acme/web  {}", data::BRANCH);
     let lines = vec![
         Line::default(),
-        Line::styled(" ~/acme/web  alex/eng-142-fix-login-redirect", prompt),
+        Line::styled(cwd.as_str(), prompt),
         Line::raw(" $ npm test -- auth"),
         Line::default(),
         Line::styled("  PASS  src/auth/session.test.ts", ok),
@@ -135,10 +138,10 @@ fn shell() -> Buffer {
         Line::raw(" Tests:  24 passed, 24 total"),
         Line::styled(" Time:   3.81 s", dim),
         Line::default(),
-        Line::styled(" ~/acme/web  alex/eng-142-fix-login-redirect", prompt),
-        Line::raw(" $ git push -u origin alex/eng-142-fix-login-redirect"),
+        Line::styled(cwd.as_str(), prompt),
+        Line::raw(" $ git push -u origin HEAD"),
         Line::default(),
-        Line::styled(" ~/acme/web  alex/eng-142-fix-login-redirect", prompt),
+        Line::styled(cwd.as_str(), prompt),
         Line::raw(" $ "),
     ];
     Paragraph::new(lines).render(Rect::new(0, 0, SHELL_W - 1, H), &mut buf);
