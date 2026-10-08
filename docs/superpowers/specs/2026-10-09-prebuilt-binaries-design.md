@@ -42,12 +42,12 @@ Rust가 없는 macOS·Linux 기기에서도 `herdr plugin install jenthous/herdr
 - **트리거**
   - `v[0-9]+.[0-9]+.[0-9]+` 태그 push: 릴리스를 만들고 파일을 올린다.
   - `workflow_dispatch`: 시험 빌드. 릴리스를 만들지 않고 빌드·압축만 한다.
-- **권한**: `contents: write` (릴리스 만들기·파일 올리기)
+- **권한**: `contents: write` (릴리스 만들기·파일 올리기). checkout은 토큰을 남기지 않는다(`persist-credentials: false`).
 - **Action은 커밋 해시로 고정한다**
   - `actions/checkout` v7.0.1: `3d3c42e5aac5ba805825da76410c181273ba90b1`
   - `taiki-e/upload-rust-binary-action` v1.30.2: `f0d45ae91ee7b8ee928de7a9d04d893a08bcbec6`
 - **작업**
-  1. `check-version` (태그 push 때만): 태그에서 `v`를 뗀 값이 `Cargo.toml`과 `herdr-plugin.toml`의 첫 `version` 값과 같지 않으면 실패한다.
+  1. `check-version` (태그 push 때만): 태그에서 `v`를 뗀 값이 `Cargo.toml`·`herdr-plugin.toml`의 첫 `version` 값, `Cargo.lock`의 herdr-linear 버전과 모두 같지 않으면 실패한다. 빌드가 `--locked`라서 `Cargo.lock`이 낡으면 릴리스를 공개한 뒤에 빌드가 모두 실패하기 때문이다.
   2. `create-release` (태그 push 때만): `gh release create <태그> --title <태그> --generate-notes --verify-tag`.
   3. `upload-assets` (2장의 4개 플랫폼): `upload-rust-binary-action`에 `bin: herdr-linear`, `target`, `checksum: sha256`, `locked: true`를 준다. 태그 push가 아니면 `dry-run: true`다. 앞 두 작업이 건너뛰어져도(시험 빌드) 돈다.
 - **결과 파일** (플랫폼마다 두 개)
@@ -65,7 +65,9 @@ Rust가 없는 macOS·Linux 기기에서도 `herdr plugin install jenthous/herdr
 3. **플랫폼**: `uname -s`·`uname -m`을 2장의 target으로 바꾼다. 표에 없으면 미리 빌드한 바이너리가 없는 것으로 본다.
 4. **받기**
    - `<RELEASES>/v<버전>/herdr-linear-<target>.tar.gz`와 `<RELEASES>/v<버전>/herdr-linear-<target>.sha256`을 `curl -fsSL`로 받는다.
-   - 막 올린 릴리스는 몇 분 동안 404가 날 수 있어서 파일마다 5번까지, 3초 간격으로 다시 시도한다.
+   - `curl`이 없으면 받지 않고 7번으로 간다.
+   - 막 올린 릴리스는 몇 분 동안 404가 날 수 있어서 파일마다 5번까지, 3초 간격으로 시도한다.
+   - 연결이 멈추면 끝없이 기다리지 않게, 연결 15초·30초 동안 1KB/s 미만이면 그 시도를 포기한다. 끝내 실패하면 주소와 curl이 알려 준 마지막 이유를 알린다.
    - `<RELEASES>` 기본값은 `https://github.com/jenthous/herdr-linear/releases/download`다.
 5. **확인**: `.sha256` 첫 칸과 받은 압축 파일의 SHA-256이 같아야 한다. `sha256sum`이 없으면 `shasum -a 256`을 쓴다.
 6. **놓기**: 임시 폴더에 압축을 풀고, `herdr-linear`를 `target/release/herdr-linear`에 권한 0755로 놓는다. 임시 이름으로 쓴 뒤 이름을 바꾼다. 액션·pane 명령의 경로(`./target/release/herdr-linear`)는 그대로다.
@@ -112,18 +114,19 @@ Rust가 없는 macOS·Linux 기기에서도 `herdr plugin install jenthous/herdr
 1. 구현을 main에 머지·push한다.
    - 이때 매니페스트 버전은 0.2.0이다. main에서 설치하면 v0.2.0 Release(바이너리 없음)를 찾다가 소스 빌드로 넘어간다. 지금과 결과가 같다.
 2. main에서 `gh workflow run release.yml`로 시험 빌드를 돌린다. 4개 플랫폼이 모두 성공해야 한다. 실패하면 고치고 다시 돌린다.
-3. 버전을 0.2.1로 올린다(`Cargo.toml`·`Cargo.lock`·`herdr-plugin.toml`). 같은 커밋에서 README를 고친다(7장). 그 커밋과 `v0.2.1` 태그를 함께 push한다.
+3. 버전을 0.2.1로 올린다(`Cargo.toml`·`Cargo.lock`·`herdr-plugin.toml`). 같은 커밋에서 README를 고친다(7장). 이 기기에서 `cargo build --release --locked`로 `Cargo.lock`이 맞는지 본 뒤 `v0.2.1` 태그를 먼저 push한다. main은 아직 올리지 않는다.
 4. 워크플로가 끝나면 Release에 파일 8개(압축 4개, 체크섬 4개)가 있는지 본다.
 5. **확인**
-   - 임시 폴더에 `v0.2.1`을 받아, cargo가 없는 `PATH`로 `bash scripts/install.sh`를 돌린다.
-   - 받은 바이너리가 `herdr-linear 0.2.1`을 출력해야 한다.
+   - 임시 폴더에 `v0.2.1`을 받아, cargo가 없는 `PATH`로 `bash scripts/install.sh`를 돌린다. 받은 바이너리가 `herdr-linear 0.2.1`을 출력해야 한다.
+   - 나머지 세 바이너리도 이 기기에서 돌릴 수 있는 만큼 돌려 본다(Rosetta로 x86_64 macOS, 컨테이너로 Linux, Linux는 정적 링크인지도 본다). 체크섬이 맞으면 깨진 바이너리도 설치되기 때문이다.
    - 이 기기의 herdr에 깔린 플러그인은 건드리지 않는다.
-6. ROADMAP을 고친다(7장). 다른 기기 업데이트 프롬프트를 사용자에게 남긴다.
+6. main을 push한다. 태그보다 늦게 올려서, 그 사이 main에서 설치하는 사람이 아직 없는 바이너리를 찾지 않게 한다.
+7. ROADMAP을 고친다(7장). 다른 기기 업데이트 프롬프트를 사용자에게 남긴다.
 
 ## 7. 문서
 
 - **README (영어·한국어)**
-  - 필요한 것: "Rust 1.88 이상"을 "미리 빌드한 바이너리가 없을 때만 Rust 1.88 이상"으로 바꾼다. 다른 플랫폼이나 받기에 실패한 경우다.
+  - 필요한 것: "Rust 1.88 이상"을 "미리 빌드한 바이너리가 없을 때만 Rust 1.88 이상"으로 바꾼다. 다른 플랫폼이나 받기에 실패한 경우다. 설치 스크립트가 쓰는 `bash`·`curl`도 적는다.
   - 설치: macOS·Linux는 설치할 때 미리 빌드한 바이너리를 받고 체크섬을 확인한다고 적는다.
   - 개발: 릴리스 방법을 한 줄로 적는다. 두 파일의 버전을 올려 main에 push하고 `vX.Y.Z` 태그를 push하면 워크플로가 바이너리를 올린다.
 - **ROADMAP (영어·한국어)**: "나중에"의 바이너리 항목을 지우고, v0.2 절에 "v0.2.1: 미리 빌드한 바이너리(macOS·Linux)와 체크섬" 줄을 더한다.

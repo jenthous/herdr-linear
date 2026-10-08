@@ -25,7 +25,7 @@
 ## 진행 순서
 
 1. Task 1 → Task 2 → 브랜치 전체 리뷰 → **C1**(main에 머지·push, 시험 빌드)
-2. Task 3(새 브랜치 `release/v0.2.1`) → **C2**(main에 머지·push, `v0.2.1` 태그 push, 릴리스 확인) → **C3**(Rust 없는 설치 확인)
+2. Task 3(새 브랜치 `release/v0.2.1`) → **C2**(`v0.2.1` 태그 먼저 push, 릴리스 확인) → **C3**(Rust 없는 설치와 네 바이너리 확인) → main에 머지·push
 3. Task 4(ROADMAP) → main에 머지·push
 
 ## Global Constraints
@@ -712,7 +712,7 @@ Expected: 모두 통과. `Cargo.lock`의 herdr-linear 버전도 0.2.1로 바뀐�
 
 ```markdown
 - herdr 0.9.3 or later
-- macOS (Apple Silicon or Intel) or Linux (x86_64 or arm64)
+- macOS (Apple Silicon or Intel) or Linux (x86_64 or arm64), with `bash` and `curl` (preinstalled on macOS and most Linux distributions)
 - Rust 1.88 or later, only when no prebuilt binary can be used (another platform, or the download fails). The plugin is then built from source.
 ```
 
@@ -745,7 +745,7 @@ scripts/deploy-local.sh   # build and link a stable copy for daily use on this m
 scripts/deploy-local.sh   # build and link a stable copy for daily use on this machine
 ```
 
-To release, bump `version` in `Cargo.toml` and `herdr-plugin.toml`, push to `main`, then push the tag `vX.Y.Z`. The release workflow builds the binaries and attaches them with checksums.
+To release, bump `version` in `Cargo.toml` and `herdr-plugin.toml` (Cargo updates `Cargo.lock`), commit, and push the tag `vX.Y.Z` first. When the release workflow has attached the binaries and checksums, push `main`.
 ````
 
 - [ ] **Step 3: README 한국어 부분을 고친다**
@@ -760,7 +760,7 @@ To release, bump `version` in `Cargo.toml` and `herdr-plugin.toml`, push to `mai
 
 ```markdown
 - herdr 0.9.3 이상
-- macOS(Apple Silicon·Intel) 또는 Linux(x86_64·arm64)
+- macOS(Apple Silicon·Intel) 또는 Linux(x86_64·arm64), 그리고 `bash`·`curl`(macOS와 대부분의 Linux에 기본으로 있어요)
 - Rust 1.88 이상은 미리 빌드한 바이너리를 쓸 수 없을 때만 필요해요(다른 플랫폼이거나 받기에 실패할 때). 그때는 소스로 빌드해요.
 ```
 
@@ -793,7 +793,7 @@ scripts/deploy-local.sh   # 이 기기에서 매일 쓸 복사본을 빌드해 h
 scripts/deploy-local.sh   # 이 기기에서 매일 쓸 복사본을 빌드해 herdr에 연결
 ```
 
-릴리스는 `Cargo.toml`과 `herdr-plugin.toml`의 `version`을 올려 `main`에 push한 뒤 `vX.Y.Z` 태그를 push해요. 릴리스 워크플로가 바이너리를 빌드해 체크섬과 함께 올려요.
+릴리스는 `Cargo.toml`과 `herdr-plugin.toml`의 `version`을 올려(`Cargo.lock`은 Cargo가 맞춰요) 커밋하고, `vX.Y.Z` 태그를 먼저 push해요. 릴리스 워크플로가 바이너리와 체크섬을 올리면 그다음에 `main`을 push해요.
 ````
 
 - [ ] **Step 4: 바탕 스펙 3.1을 고친다**
@@ -825,10 +825,14 @@ git commit -m "release: v0.2.1 — 미리 빌드한 바이너리 설치 안내" 
 
 ### C2: v0.2.1 릴리스 (컨트롤러)
 
+태그를 먼저 올리고, 자산과 C3 확인이 끝난 뒤에 main을 올린다. 그 사이 main에서 설치하는 사람이 아직 없는 v0.2.1 바이너리를 찾지 않게 하려는 것이다(최종 리뷰 반영).
+
 ```bash
-git checkout main && git merge --ff-only release/v0.2.1
+git checkout release/v0.2.1
+cargo build --release --locked   # 워크플로가 --locked로 빌드하므로 Cargo.lock이 맞는지 먼저 본다
+gh api repos/jenthous/herdr-linear/immutable-releases --jq .enabled   # false여야 한다(릴리스를 먼저 공개하고 파일을 나중에 올린다)
 git tag -a v0.2.1 -m "v0.2.1 — 미리 빌드한 바이너리(macOS·Linux)와 SHA-256 체크섬, 설치 때 받고 안 되면 소스 빌드"
-git push origin main v0.2.1
+git push origin v0.2.1
 sleep 5; gh run list --workflow release.yml --limit 1
 gh run watch <run-id> --exit-status
 gh release view v0.2.1 --json assets --jq '.assets[].name' | sort
@@ -847,26 +851,43 @@ herdr-linear-x86_64-unknown-linux-musl.sha256
 herdr-linear-x86_64-unknown-linux-musl.tar.gz
 ```
 
-업로드가 실패하면 원인을 고친 뒤 `gh run rerun <run-id> --failed`로 다시 올린다. 태그는 옮기지 않는다.
+업로드가 실패하면
+- `gh run rerun <run-id> --failed`로 실패한 작업만 다시 돌린다(업로드는 `--clobber`라 겹쳐 써도 된다).
+- 전체를 다시 돌리면 `create-release`가 "already exists"로 막힌다. 그때는 `gh release delete v0.2.1`(태그는 지우지 않는다) 뒤에 다시 돌린다.
+- 워크플로 파일을 고쳐야 하면 이미 올린 태그로는 고친 파일이 돌지 않는다. 태그를 옮기지 않고 v0.2.2로 낸다.
+
+C3이 끝나면 main을 올린다.
+
+```bash
+git checkout main && git merge --ff-only release/v0.2.1 && git push origin main
+```
 
 ---
 
 ### C3: Rust 없는 설치 확인 (컨트롤러)
 
-이 기기의 herdr 플러그인은 건드리지 않는다.
+이 기기의 herdr 플러그인은 건드리지 않는다. 설치 스크립트로 이 기기용 바이너리를 받아 보고, 나머지 세 바이너리도 이 기기에서 돌릴 수 있는 만큼 돌려 본다(최종 리뷰 반영: 체크섬이 맞으면 깨진 바이너리도 설치되기 때문).
 
 ```bash
 T="$(mktemp -d)"
 git clone -q --depth 1 --branch v0.2.1 https://github.com/jenthous/herdr-linear.git "$T/p"
 env -i PATH=/usr/bin:/bin HOME="$T" /bin/bash "$T/p/scripts/install.sh"
 "$T/p/target/release/herdr-linear" --version
+gh release download v0.2.1 --repo jenthous/herdr-linear --pattern '*.tar.gz' --dir "$T/rel"
+for t in x86_64-apple-darwin aarch64-unknown-linux-musl x86_64-unknown-linux-musl; do
+  mkdir -p "$T/$t" && tar -xzf "$T/rel/herdr-linear-$t.tar.gz" -C "$T/$t"
+done
+arch -x86_64 "$T/x86_64-apple-darwin/herdr-linear" --version
+file "$T/aarch64-unknown-linux-musl/herdr-linear" "$T/x86_64-unknown-linux-musl/herdr-linear"
+docker run --rm --network none -v "$T:/r:ro" alpine:3.19 /r/aarch64-unknown-linux-musl/herdr-linear --version
 rm -rf "$T"
 ```
 
 Expected
 - `herdr-linear: downloading herdr-linear-aarch64-apple-darwin.tar.gz for v0.2.1`
 - `herdr-linear: installed the prebuilt binary for v0.2.1 (aarch64-apple-darwin)`
-- `herdr-linear 0.2.1`
+- `herdr-linear 0.2.1` 세 번(이 기기 바이너리, Rosetta로 돈 x86_64 macOS, alpine 컨테이너의 aarch64 Linux)
+- `file`이 두 Linux 바이너리를 모두 `statically linked`로 보여 준다. x86_64 Linux는 amd64 alpine 이미지가 이미 있을 때만 컨테이너로 돌리고, 없으면 `file` 결과로 갈음한다.
 
 `cargo`가 없는 `PATH`라서, 받지 못했다면 "cannot install"로 끝난다.
 
