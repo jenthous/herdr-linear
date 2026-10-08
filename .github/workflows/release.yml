@@ -1,0 +1,58 @@
+# 릴리스: vX.Y.Z 태그를 push하면 macOS·Linux 바이너리와 SHA-256 체크섬을 그 태그의 GitHub Release에 올린다.
+# 시험 빌드: Actions 탭이나 `gh workflow run release.yml`로 돌리면 릴리스 없이 빌드·압축만 한다.
+name: release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check-version:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: bash scripts/check-release-version.sh "$GITHUB_REF_NAME"
+
+  create-release:
+    needs: check-version
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes --verify-tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  upload-assets:
+    needs: create-release
+    # 시험 빌드에서는 앞 두 작업이 건너뛰어져도 돈다. 앞 작업이 실패하면 돌지 않는다
+    if: ${{ !failure() && !cancelled() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: taiki-e/upload-rust-binary-action@f0d45ae91ee7b8ee928de7a9d04d893a08bcbec6 # v1.30.2
+        with:
+          bin: herdr-linear
+          target: ${{ matrix.target }}
+          checksum: sha256
+          locked: true
+          dry-run: ${{ github.event_name != 'push' }}
+          token: ${{ github.token }}
