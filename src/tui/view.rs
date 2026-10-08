@@ -9,6 +9,7 @@ use unicode_width::UnicodeWidthStr;
 
 pub use super::app::Target;
 use super::app::{Act, App, Detail, Mode, Problem, Row, Tab};
+use crate::i18n::t;
 use crate::linear::types::Issue;
 use crate::markdown::{self, Theme, sanitize};
 use crate::ui::relations;
@@ -161,13 +162,13 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect, now: i64) -> Vec<Hit> {
 /// 상단 오른쪽 상태: 갱신 중 / n분 전 갱신 / 오프라인 / 오류. 한도 초과는 하단에 잠깐 알린다.
 pub fn status_span(app: &App, now: i64) -> Span<'static> {
     if app.loading > 0 {
-        return Span::styled("갱신 중…", DIM);
+        return Span::styled(t().status_updating, DIM);
     }
     match &app.problem {
-        Some(Problem::Offline(_)) => Span::styled("오프라인", WARN),
-        Some(Problem::Error(_)) => Span::styled("오류", ERROR),
+        Some(Problem::Offline(_)) => Span::styled(t().status_offline, WARN),
+        Some(Problem::Error(_)) => Span::styled(t().status_error, ERROR),
         None => match app.updated_at {
-            Some(at) => Span::styled(format!("{} 갱신", ago(now, at)), DIM),
+            Some(at) => Span::styled((t().status_updated)(&ago(now, at)), DIM),
             None => Span::raw(""),
         },
     }
@@ -178,17 +179,14 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect) {
     let line = if app.mode == Mode::Search {
         let mut spans = vec![Span::styled(" > ", ACCENT), Span::raw(query.clone())];
         if query.is_empty() {
-            spans.push(Span::styled(
-                " ID·제목·본문 검색 · l:라벨 s:상태 @담당자 #팀",
-                DIM,
-            ));
+            spans.push(Span::styled(t().search_placeholder, DIM));
         }
         // 한글 IME가 조합 중인 글자를 제자리에 보이도록 실제 커서를 검색어 끝에 둔다
         let x = area.x + 3 + query.width() as u16;
         f.set_cursor_position(Position::new(x.min(area.right().saturating_sub(1)), area.y));
         Line::from(spans)
     } else if query.is_empty() {
-        Line::from(Span::styled(" / 검색", DIM))
+        Line::from(Span::styled(t().search_prompt, DIM))
     } else {
         Line::from(vec![Span::styled(" / ", DIM), Span::raw(query)])
     };
@@ -199,9 +197,9 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect) {
 fn draw_list(f: &mut Frame, app: &App, area: Rect, drawn: &mut Drawn) {
     if app.rows.is_empty() {
         let text = if app.loading > 0 {
-            "불러오는 중…"
+            t().loading
         } else {
-            "결과가 없어요"
+            t().no_results
         };
         f.render_widget(Paragraph::new(Span::styled(format!("  {text}"), DIM)), area);
         return;
@@ -213,7 +211,7 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect, drawn: &mut Drawn) {
     let mut selected_item = 0;
     for (i, row) in app.rows.iter().enumerate() {
         if matches!(row, Row::Pinned(_)) {
-            items.push(ListItem::new(Span::styled(" 현재 브랜치", DIM)));
+            items.push(ListItem::new(Span::styled(t().pinned_header, DIM)));
             item_rows.push(None);
         }
         if i > 0 && matches!(app.rows[i - 1], Row::Pinned(_)) {
@@ -228,7 +226,7 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect, drawn: &mut Drawn) {
         }
         let line = match row {
             Row::Pinned(issue) | Row::Issue(issue) => issue_row(issue, width),
-            Row::DeepSearch => Line::from(Span::styled("⏎ 서버에서 검색 (코멘트 포함)", ACCENT)),
+            Row::DeepSearch => Line::from(Span::styled(t().deep_search_row, ACCENT)),
         };
         let marker = if i == app.selected { "▶ " } else { "  " };
         let mut spans = vec![Span::styled(marker, ACCENT)];
@@ -285,7 +283,10 @@ pub fn issue_header(issue: &Issue, width: u16, show_parent: bool) -> Vec<Line<'s
             state_style(&issue.state),
         ),
         Span::styled(
-            format!(" · 우선순위 {}", priority_label(issue.priority)),
+            format!(
+                " · {}",
+                (t().priority_named)(priority_label(issue.priority))
+            ),
             DIM,
         ),
     ];
@@ -294,13 +295,13 @@ pub fn issue_header(issue: &Issue, width: u16, show_parent: bool) -> Vec<Line<'s
             format!(" · @{}", sanitize(&a.display_name)),
             DIM,
         )),
-        None => meta.push(Span::styled(" · 담당자 없음", DIM)),
+        None => meta.push(Span::styled(format!(" · {}", t().no_assignee), DIM)),
     }
     lines.push(Line::from(meta));
     if let Some(pr) = issue.open_pr() {
-        let mut text = format!("{} 열림", pr.label());
+        let mut text = (t().pr_open)(&pr.label());
         if pr.draft {
-            text.push_str(" (초안)");
+            text.push_str(t().pr_draft);
         }
         if let Some(repo) = &pr.repo {
             text.push_str(&format!(" · {}", sanitize(repo)));
@@ -319,23 +320,23 @@ pub fn issue_header(issue: &Issue, width: u16, show_parent: bool) -> Vec<Line<'s
     }
     let mut info = Vec::new();
     if let Some(p) = &issue.project {
-        info.push(format!("프로젝트 {}", sanitize(&p.name)));
+        info.push((t().project_named)(&sanitize(&p.name)));
     }
     if let Some(c) = &issue.cycle {
         let name = c
             .name
             .clone()
             .unwrap_or_else(|| (c.number as i64).to_string());
-        info.push(format!("사이클 {}", sanitize(&name)));
+        info.push((t().cycle_named)(&sanitize(&name)));
     }
     if show_parent && let Some(p) = &issue.parent {
-        info.push(format!("상위 {}", sanitize(&p.identifier)));
+        info.push((t().parent_named)(&sanitize(&p.identifier)));
     }
     if let Some(e) = issue.estimate {
-        info.push(format!("예상 {e}"));
+        info.push((t().estimate_named)(&e.to_string()));
     }
     if let Some(d) = &issue.due_date {
-        info.push(format!("마감 {}", sanitize(d)));
+        info.push((t().due_named)(&sanitize(d)));
     }
     if !info.is_empty() {
         let sep = if extra.is_empty() { "" } else { " · " };
@@ -365,7 +366,7 @@ fn draw_preview(f: &mut Frame, app: &App, area: Rect) {
         Some(body) if !body.is_empty() => lines.extend(
             markdown::render_with(body, inner.width, &Theme::default(), &app.team_keys()).lines,
         ),
-        _ => lines.push(Line::from(Span::styled("(본문 없음)", DIM))),
+        _ => lines.push(Line::from(Span::styled(t().no_body, DIM))),
     }
     f.render_widget(Paragraph::new(lines), inner);
 }
@@ -414,14 +415,11 @@ fn detail_lines(
         None => {
             let id = sanitize(&d.id);
             let (text, style) = if d.gone {
-                (format!("{id}: 찾을 수 없거나 보관·삭제된 이슈예요"), WARN)
+                ((t().detail_gone_id)(&id), WARN)
             } else if d.loading {
-                (format!("{id} 불러오는 중…"), DIM)
+                ((t().detail_loading_id)(&id), DIM)
             } else {
-                (
-                    format!("{id}: 불러오지 못했어요. r로 다시 시도하세요"),
-                    WARN,
-                )
+                ((t().detail_failed_id)(&id), WARN)
             };
             lines.push(Line::from(Span::styled(text, style)));
         }
@@ -429,10 +427,7 @@ fn detail_lines(
             lines.extend(issue_header(issue, width, false));
             lines.push(Line::from(Span::styled(sanitize(&issue.url), DIM)));
             if d.gone {
-                lines.push(Line::from(Span::styled(
-                    "보관되었거나 삭제된 이슈예요",
-                    WARN,
-                )));
+                lines.push(Line::from(Span::styled(t().detail_gone, WARN)));
             }
             lines.push(Line::default());
             let (rel, rows) = relations::lines(issue.parent.as_ref(), d.relations.as_ref(), width);
@@ -453,23 +448,19 @@ fn detail_lines(
                     next_link += r.links.len();
                     lines.extend(r.lines);
                 }
-                _ => lines.push(Line::from(Span::styled("(본문 없음)", DIM))),
+                _ => lines.push(Line::from(Span::styled(t().no_body, DIM))),
             }
             if !d.comments.is_empty() {
                 lines.push(Line::default());
                 lines.push(Line::from(Span::styled(
-                    format!(
-                        "── 코멘트 {}{} ──",
-                        d.comments.len(),
-                        if d.more_comments { "+" } else { "" }
-                    ),
+                    (t().comments_header)(d.comments.len(), d.more_comments),
                     DIM,
                 )));
                 for c in &d.comments {
                     let who = c
                         .user
                         .as_ref()
-                        .map_or("알 수 없음".to_string(), |u| sanitize(&u.display_name));
+                        .map_or(t().unknown_user.to_string(), |u| sanitize(&u.display_name));
                     lines.push(Line::default());
                     lines.push(Line::from(vec![
                         Span::styled(who, Style::new().add_modifier(Modifier::BOLD)),
@@ -481,14 +472,11 @@ fn detail_lines(
                 }
                 if d.more_comments {
                     lines.push(Line::default());
-                    lines.push(Line::from(Span::styled(
-                        "더 오래된 코멘트가 있어요. 브라우저에서 보세요 (o)",
-                        DIM,
-                    )));
+                    lines.push(Line::from(Span::styled(t().more_comments_tui, DIM)));
                 }
             } else if d.loading {
                 lines.push(Line::default());
-                lines.push(Line::from(Span::styled("코멘트 불러오는 중…", DIM)));
+                lines.push(Line::from(Span::styled(t().comments_loading, DIM)));
             }
         }
     }
@@ -496,13 +484,12 @@ fn detail_lines(
 }
 
 fn hints(mode: Mode) -> &'static str {
+    let t = t();
     match mode {
-        Mode::Search => " ⏎ 상세  Tab 보기  ↑↓ 이동  ^K 메뉴  Esc 목록 모드",
-        Mode::List => " j/k 이동  / 검색  ⏎ 상세  y URL 복사  Y PR 링크  ^K 메뉴  q 닫기",
-        Mode::Detail => {
-            " j/k 스크롤  t 관계  u 링크  y URL 복사  Y PR 링크  ^K 메뉴  Esc 뒤로  q 닫기"
-        }
-        Mode::Onboarding => " ⏎ 확인  Esc 닫기",
+        Mode::Search => t.hints_search,
+        Mode::List => t.hints_list,
+        Mode::Detail => t.hints_detail,
+        Mode::Onboarding => t.hints_onboarding,
     }
 }
 
@@ -516,11 +503,8 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect, now: i64) {
         Span::styled(format!(" {}", sanitize(text)), WARN)
     } else {
         match &app.problem {
-            Some(Problem::Offline(m)) => Span::styled(
-                format!(" 오프라인이라 저장된 내용을 보여줘요 ({})", sanitize(m)),
-                WARN,
-            ),
-            Some(Problem::Error(m)) => Span::styled(format!(" 오류: {}", sanitize(m)), ERROR),
+            Some(Problem::Offline(m)) => Span::styled((t().offline_footer)(&sanitize(m)), WARN),
+            Some(Problem::Error(m)) => Span::styled((t().error_footer)(&sanitize(m)), ERROR),
             None => Span::styled(hints(app.mode), DIM),
         }
     };
@@ -604,7 +588,7 @@ fn draw_onboarding(f: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(ACCENT)
-        .title(" Linear 연결 ");
+        .title(t().onboarding_title);
     let inner = block.inner(rect);
     f.render_widget(block, rect);
     let inner = Rect {
@@ -614,17 +598,14 @@ fn draw_onboarding(f: &mut Frame, app: &App, area: Rect) {
     };
     let mut lines: Vec<Line<'static>> = Vec::new();
     if app.env_key_invalid {
-        lines.push(Line::from(Span::styled(
-            "LINEAR_API_KEY 환경 변수의 키가 유효하지 않아요",
-            ERROR,
-        )));
-        lines.push(Line::from("환경 변수를 고치거나 지운 뒤 다시 열어주세요."));
+        lines.push(Line::from(Span::styled(t().env_key_invalid, ERROR)));
+        lines.push(Line::from(t().env_key_fix));
         lines.push(Line::default());
-        lines.push(Line::from(Span::styled("Esc 닫기", DIM)));
+        lines.push(Line::from(Span::styled(t().esc_close, DIM)));
         f.render_widget(Paragraph::new(lines), inner);
         return;
     }
-    lines.push(Line::from("Linear Personal API 키를 붙여넣으세요."));
+    lines.push(Line::from(t().paste_key));
     lines.push(Line::from(Span::styled(
         "Linear → Settings → Security & access → Personal API keys",
         DIM,
@@ -632,22 +613,24 @@ fn draw_onboarding(f: &mut Frame, app: &App, area: Rect) {
     lines.push(Line::default());
     let masked = "•".repeat(app.key_input.chars().count());
     let shown = if app.key_checking {
-        "확인 중…".to_string()
+        t().checking.to_string()
     } else {
         masked.clone()
     };
     lines.push(Line::from(vec![
-        Span::styled("키: ", ACCENT),
+        Span::styled(t().key_label, ACCENT),
         Span::raw(shown),
     ]));
     if let Some(err) = &app.key_error {
         lines.push(Line::from(Span::styled(sanitize(err), ERROR)));
     }
     lines.push(Line::default());
-    lines.push(Line::from(Span::styled("⏎ 확인 · Esc 닫기", DIM)));
+    lines.push(Line::from(Span::styled(t().confirm_close, DIM)));
     if !app.key_checking {
+        // 이름표 폭은 언어마다 다르다 (한국어 "키: "는 4칸, 영어 "Key: "는 5칸)
         f.set_cursor_position(Position::new(
-            (inner.x + 4 + masked.width() as u16).min(inner.right().saturating_sub(1)),
+            (inner.x + t().key_label.width() as u16 + masked.width() as u16)
+                .min(inner.right().saturating_sub(1)),
             inner.y + 3,
         ));
     }
@@ -657,6 +640,9 @@ fn draw_onboarding(f: &mut Frame, app: &App, area: Rect) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::i18n::{Lang, has_hangul, t, with_lang};
+    use crate::linear::client::ApiError;
+    use crate::linear::types::Comment;
     use crate::linear::types::{IssueRelations, RelatedIssue, Viewer};
     use crate::test_support::IssueBuilder;
     use crate::tui::app::{Input, Msg};
@@ -1474,5 +1460,290 @@ mod tests {
             Color::Reset,
             "상세에서는 탭을 눌러도 바뀌지 않는다"
         );
+    }
+
+    /// 한글 없는 가짜 데이터.
+    fn latin_viewer() -> Viewer {
+        serde_json::from_value(serde_json::json!({
+            "id": "me", "name": "Alex Rivera", "displayName": "alex", "email": "alex@example.com",
+            "organization": { "id": "org1", "name": "Acme", "urlKey": "acme" },
+            "teams": { "nodes": [ { "id": "team-ENG", "key": "ENG", "name": "Engineering" } ] }
+        }))
+        .unwrap()
+    }
+
+    fn latin_rel(id: &str, identifier: &str, title: &str, state_type: &str) -> RelatedIssue {
+        let i = IssueBuilder::new(id, identifier, title)
+            .state(state_type, state_type)
+            .build();
+        RelatedIssue {
+            id: i.id,
+            identifier: i.identifier,
+            title: i.title,
+            state: i.state,
+        }
+    }
+
+    fn latin_issues() -> Vec<Issue> {
+        vec![
+            IssueBuilder::new("a", "ENG-1", "Login bug")
+                .state("In Progress", "started")
+                .priority(2)
+                .assignee("me", "alex")
+                .labels(&["bug"])
+                .parent("p", "ENG-9", "Auth revamp", "started")
+                .pr(
+                    "https://github.com/acme/web/pull/7",
+                    "open",
+                    7,
+                    "2026-10-01T00:00:00.000Z",
+                )
+                .description("## Steps\n- Sign in\n\n![diagram](https://x.dev/a.png) [log](https://x.dev/log)")
+                .build(),
+            IssueBuilder::new("b", "ENG-2", "Checkout page").build(),
+        ]
+    }
+
+    fn latin_detail(issue: &Issue) -> Msg {
+        let comments: Vec<Comment> = serde_json::from_value(serde_json::json!([
+            { "id": "c1", "body": "On it", "createdAt": "2026-10-01T00:00:00.000Z", "editedAt": null,
+              "user": { "id": "u2", "name": "Sam Lee", "displayName": "sam" } },
+            { "id": "c2", "body": "Done?", "createdAt": "2026-10-01T01:00:00.000Z", "editedAt": null,
+              "user": null }
+        ]))
+        .unwrap();
+        Msg::Detail {
+            id: issue.id.clone(),
+            issue: issue.clone(),
+            comments,
+            more: true,
+            relations: Some(IssueRelations {
+                children: vec![
+                    latin_rel("c1", "ENG-11", "Token refresh", "completed"),
+                    latin_rel("c2", "ENG-12", "Session timeout", "started"),
+                ],
+                more_children: true,
+                blocked_by: vec![latin_rel("b1", "ENG-20", "Schema freeze", "unstarted")],
+                blocking: vec![latin_rel("k1", "ENG-30", "Billing page", "unstarted")],
+                related: vec![latin_rel("r1", "ENG-40", "Login screen", "completed")],
+            }),
+            fresh: true,
+        }
+    }
+
+    /// 모든 모드·메뉴·상태를 한 번씩 보이는 앱들. 메뉴 문구는 열 때 정해지니 지금 언어 안에서 만든다.
+    fn latin_apps() -> Vec<(&'static str, App)> {
+        let start = || {
+            let (mut a, _) = App::start(None);
+            a.apply(Msg::Viewer(latin_viewer()), T0);
+            a
+        };
+        let listed = || {
+            let mut a = start();
+            a.apply(Msg::Pinned(Some(latin_issues()[0].clone())), T0);
+            a.apply(
+                Msg::Tab {
+                    tab: Tab::Mine,
+                    issues: latin_issues(),
+                    fresh: true,
+                    has_more: false,
+                    append: false,
+                },
+                T0,
+            );
+            a
+        };
+        let detailed = || {
+            let mut a = listed();
+            a.handle(Input::Enter, T0);
+            a.apply(latin_detail(&latin_issues()[0]), T0);
+            a
+        };
+        let mut searching = listed();
+        for c in "login".chars() {
+            searching.handle(Input::Char(c), T0);
+        }
+        let mut list = listed();
+        list.handle(Input::Esc, T0);
+        let mut list_menu = listed();
+        list_menu.handle(Input::Menu, T0);
+        let mut detail_loading = listed();
+        detail_loading.handle(Input::Enter, T0);
+        let mut gone = listed();
+        gone.handle(Input::Enter, T0);
+        gone.apply(Msg::DetailGone(latin_issues()[0].id.clone()), T0);
+        let mut detail_menu = detailed();
+        detail_menu.handle(Input::Menu, T0);
+        let mut links = detailed();
+        links.handle(Input::Act(Act::Links), T0);
+        let mut relations = detailed();
+        relations.handle(Input::Act(Act::Relations), T0);
+        let mut offline = listed();
+        offline.apply(Msg::Failed(ApiError::Offline("timeout".into())), T0);
+        let mut error = listed();
+        error.apply(Msg::Failed(ApiError::GraphQl("bad request".into())), T0);
+        let mut limited = listed();
+        limited.apply(
+            Msg::Failed(ApiError::RateLimited {
+                reset_at_ms: Some(T0 + 90_000),
+            }),
+            T0,
+        );
+        let mut throttled = listed();
+        throttled.apply(Msg::Throttled(T0 + 60_000), T0);
+        let mut deep_limited = listed();
+        deep_limited.apply(Msg::DeepLimited, T0);
+        let mut onboarding = App::onboarding(false);
+        onboarding.key_error = Some(t().key_invalid.to_string());
+        vec![
+            ("loading", start()),
+            ("search", listed()),
+            ("searching", searching),
+            ("list", list),
+            ("list menu", list_menu),
+            ("detail", detailed()),
+            ("detail loading", detail_loading),
+            ("gone", gone),
+            ("detail menu", detail_menu),
+            ("links", links),
+            ("relations", relations),
+            ("offline", offline),
+            ("error", error),
+            ("rate limited", limited),
+            ("throttled", throttled),
+            ("deep limited", deep_limited),
+            ("onboarding", onboarding),
+            ("env key", App::onboarding(true)),
+        ]
+    }
+
+    #[test]
+    fn non_korean_screens_have_no_hangul() {
+        for lang in [Lang::En, Lang::Ja, Lang::ZhCn, Lang::De] {
+            with_lang(lang, || {
+                for (name, app) in latin_apps() {
+                    for (w, h) in [(120, 40), (60, 30)] {
+                        let text = screen(&app, w, h).0.join("\n");
+                        assert!(!has_hangul(&text), "{lang:?} {name} {w}x{h}:\n{text}");
+                    }
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn screens_follow_the_language() {
+        with_lang(Lang::En, || {
+            let apps = latin_apps();
+            let get = |name: &str| &apps.iter().find(|(n, _)| *n == name).unwrap().1;
+            let (rows, _, _) = screen(get("search"), 120, 30);
+            assert!(rows[0].contains("[My issues]"), "{}", rows[0]);
+            assert!(rows[0].ends_with("Updated just now"), "{}", rows[0]);
+            assert!(
+                rows.iter().any(|r| r.contains("Current branch")),
+                "{rows:?}"
+            );
+            assert!(rows[29].contains("⏎ open  Tab view"), "{}", rows[29]);
+            let (rows, _, _) = screen(get("detail"), 120, 60);
+            let text = rows.join("\n");
+            for want in [
+                "Priority High",
+                "PR #7 open",
+                "Parent     ",
+                "Blocked by ",
+                "Sub-issues ",
+                "── Comments 2+ ──",
+                "Unknown · ",
+                "Older comments are in the browser (o)",
+                "[image 1: diagram]",
+            ] {
+                assert!(text.contains(want), "{want}:\n{text}");
+            }
+            let (rows, _, _) = screen(get("offline"), 120, 30);
+            assert!(rows[0].ends_with("Offline"), "{}", rows[0]);
+            assert!(
+                rows[29].contains("Offline, showing saved data (timeout)"),
+                "{}",
+                rows[29]
+            );
+        });
+    }
+
+    #[test]
+    fn header_fits_sixty_columns_in_every_language() {
+        for lang in Lang::ALL {
+            with_lang(lang, || {
+                let widest = Tab::ALL
+                    .into_iter()
+                    .max_by_key(|tab| tab.title().width())
+                    .unwrap();
+                let t = t();
+                let updated = |ms: i64| (t.status_updated)(&ago(T0, T0 - ms));
+                // (상단 오른쪽에 보여야 할 상태, 앱을 그 상태로 만드는 함수)
+                type Case = (String, Box<dyn Fn(&mut App)>);
+                let cases: Vec<Case> = vec![
+                    (
+                        t.status_updating.to_string(),
+                        Box::new(|a: &mut App| a.loading = 1),
+                    ),
+                    (
+                        t.status_offline.to_string(),
+                        Box::new(|a: &mut App| a.problem = Some(Problem::Offline("x".into()))),
+                    ),
+                    (
+                        t.status_error.to_string(),
+                        Box::new(|a: &mut App| a.problem = Some(Problem::Error("x".into()))),
+                    ),
+                    (
+                        updated(59 * 60_000),
+                        Box::new(|a: &mut App| a.updated_at = Some(T0 - 59 * 60_000)),
+                    ),
+                    (
+                        updated(23 * 3_600_000),
+                        Box::new(|a: &mut App| a.updated_at = Some(T0 - 23 * 3_600_000)),
+                    ),
+                    (
+                        updated(99 * 86_400_000),
+                        Box::new(|a: &mut App| a.updated_at = Some(T0 - 99 * 86_400_000)),
+                    ),
+                ];
+                for (status, set) in cases {
+                    let mut a = app();
+                    a.tab = widest;
+                    a.loading = 0;
+                    a.problem = None;
+                    set(&mut a);
+                    let (rows, _, _) = screen(&a, 60, 10);
+                    assert!(
+                        rows[0].ends_with(&status),
+                        "{lang:?}: {:?} / {status}",
+                        rows[0]
+                    );
+                    for tab in Tab::ALL {
+                        assert!(rows[0].contains(tab.title()), "{lang:?}: {:?}", rows[0]);
+                    }
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn onboarding_cursor_follows_the_key_label_width() {
+        for lang in Lang::ALL {
+            with_lang(lang, || {
+                let mut a = App::onboarding(false);
+                a.key_input = "abc".into();
+                let (rows, _, mut term) = screen(&a, 100, 20);
+                let pos = term.get_cursor_position().unwrap();
+                let row = &rows[usize::from(pos.y)];
+                let label = t().key_label.trim_end();
+                let col = row.find(label).expect("key label on the cursor row");
+                assert_eq!(
+                    usize::from(pos.x),
+                    row[..col].width() + t().key_label.width() + 3,
+                    "{lang:?}: {row}"
+                );
+            });
+        }
     }
 }

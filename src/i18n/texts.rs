@@ -161,4 +161,62 @@ pub struct Texts {
     pub log_side_record_remove: &'static str,
     /// 설정 경고들을 ` · `로 이은 것
     pub settings_warning: fn(&str) -> String,
+    // ── 화면 (`tui::view`) ──
+    pub status_updating: &'static str,
+    pub status_offline: &'static str,
+    pub status_error: &'static str,
+    /// 마지막 갱신 (`ago`의 결과)
+    pub status_updated: fn(&str) -> String,
+    pub search_placeholder: &'static str,
+    pub search_prompt: &'static str,
+    pub loading: &'static str,
+    pub no_results: &'static str,
+    pub pinned_header: &'static str,
+    pub deep_search_row: &'static str,
+    /// 우선순위 이름
+    pub priority_named: fn(&str) -> String,
+    pub no_assignee: &'static str,
+    /// PR 이름 (`PR #12`)
+    pub pr_open: fn(&str) -> String,
+    pub pr_draft: &'static str,
+    /// 프로젝트 이름
+    pub project_named: fn(&str) -> String,
+    /// 사이클 이름이나 번호
+    pub cycle_named: fn(&str) -> String,
+    /// 상위 이슈 식별자
+    pub parent_named: fn(&str) -> String,
+    /// 예상 점수
+    pub estimate_named: fn(&str) -> String,
+    /// 마감일
+    pub due_named: fn(&str) -> String,
+    pub no_body: &'static str,
+    /// (코멘트 수, 더 있는지)
+    pub comments_header: fn(usize, bool) -> String,
+    pub unknown_user: &'static str,
+    pub more_comments_tui: &'static str,
+    pub comments_loading: &'static str,
+    /// 이슈 식별자
+    pub detail_gone_id: fn(&str) -> String,
+    /// 이슈 식별자
+    pub detail_loading_id: fn(&str) -> String,
+    /// 이슈 식별자
+    pub detail_failed_id: fn(&str) -> String,
+    pub detail_gone: &'static str,
+    pub hints_search: &'static str,
+    pub hints_list: &'static str,
+    pub hints_detail: &'static str,
+    pub hints_onboarding: &'static str,
+    /// 오프라인 이유
+    pub offline_footer: fn(&str) -> String,
+    /// 오류 문구
+    pub error_footer: fn(&str) -> String,
+    pub onboarding_title: &'static str,
+    pub env_key_invalid: &'static str,
+    pub env_key_fix: &'static str,
+    pub esc_close: &'static str,
+    pub paste_key: &'static str,
+    pub checking: &'static str,
+    /// 키 입력 칸 이름표. 커서 위치가 이 폭을 따른다
+    pub key_label: &'static str,
+    pub confirm_close: &'static str,
 }
