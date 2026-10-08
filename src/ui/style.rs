@@ -69,34 +69,31 @@ pub fn priority_label(p: i64) -> &'static str {
     }
 }
 
-/// 우선순위 칸의 글자(1칸). 막대가 높을수록 우선순위가 높다. 긴급은 `!`, 없음·모르는 값은 빈칸.
+/// 우선순위 라벨(2칸). 흔히 쓰는 표기대로 숫자가 작을수록 급하다.
+/// 긴급 P0, 높음 P1, 보통 P2, 낮음 P3, 없음·모르는 값은 빈칸.
 fn priority_mark(p: i64) -> &'static str {
     match p {
-        1 => "!",
-        2 => "▆",
-        3 => "▄",
-        4 => "▂",
-        _ => " ",
+        1 => "P0",
+        2 => "P1",
+        3 => "P2",
+        4 => "P3",
+        _ => "  ",
     }
 }
 
-/// 우선순위 칸의 바탕. 이 회색 칸 안에서 우선순위가 높을수록 막대가 차오른다
-const PRIORITY_TRACK: Color = Color::Rgb(64, 64, 64);
-
-/// 목록 줄의 우선순위 칸(1칸). 회색 칸 안에 낮음은 회색, 보통은 노랑, 높음은 주황 막대가 차오르고,
-/// 긴급은 빨간 굵은 `!`, 없음·모르는 값은 그냥 빈칸이다.
+/// 목록 줄의 우선순위 칸(2칸). 긴급은 빨간 굵은 P0, 높음은 주황 P1, 보통은 노랑 P2, 낮음은 회색 P3.
 pub fn priority_span(p: i64) -> Span<'static> {
-    let fill = match p {
+    let style = match p {
         1 => Style::new().fg(Color::Red).add_modifier(Modifier::BOLD),
         2 => Style::new().fg(Color::Rgb(242, 153, 74)),
         3 => Style::new().fg(Color::Rgb(242, 201, 76)),
         4 => Style::new().fg(Color::Rgb(150, 150, 150)),
-        _ => return Span::raw(" "),
+        _ => Style::new(),
     };
-    Span::styled(priority_mark(p), fill.bg(PRIORITY_TRACK))
+    Span::styled(priority_mark(p), style)
 }
 
-/// 색 없는 출력의 우선순위 칸(1칸).
+/// 색 없는 출력의 우선순위 칸(2칸).
 pub fn priority_text(p: i64) -> String {
     priority_mark(p).to_string()
 }
@@ -181,33 +178,42 @@ mod tests {
     }
 
     #[test]
-    fn priority_cell_fills_a_gray_cell_by_level() {
-        let track = Style::new().bg(Color::Rgb(64, 64, 64));
+    fn priority_label_puts_the_most_urgent_first() {
         assert_eq!(
             priority_span(1),
-            Span::styled("!", track.fg(Color::Red).add_modifier(Modifier::BOLD))
+            Span::styled(
+                "P0",
+                Style::new().fg(Color::Red).add_modifier(Modifier::BOLD)
+            )
         );
         assert_eq!(
             priority_span(2),
-            Span::styled("▆", track.fg(Color::Rgb(242, 153, 74)))
+            Span::styled("P1", Style::new().fg(Color::Rgb(242, 153, 74)))
         );
         assert_eq!(
             priority_span(3),
-            Span::styled("▄", track.fg(Color::Rgb(242, 201, 76)))
+            Span::styled("P2", Style::new().fg(Color::Rgb(242, 201, 76)))
         );
         assert_eq!(
             priority_span(4),
-            Span::styled("▂", track.fg(Color::Rgb(150, 150, 150)))
+            Span::styled("P3", Style::new().fg(Color::Rgb(150, 150, 150)))
         );
         for p in [0, 5, -1] {
-            assert_eq!(priority_span(p), Span::raw(" "), "없음은 그냥 빈칸: {p}");
+            assert_eq!(priority_span(p), Span::raw("  "), "없음은 빈칸: {p}");
         }
-        for (p, mark) in [(1, "!"), (2, "▆"), (3, "▄"), (4, "▂"), (0, " "), (5, " ")] {
-            assert_eq!(priority_text(p), mark, "{p}");
+        for (p, label) in [
+            (1, "P0"),
+            (2, "P1"),
+            (3, "P2"),
+            (4, "P3"),
+            (0, "  "),
+            (-1, "  "),
+        ] {
+            assert_eq!(priority_text(p), label, "{p}");
         }
         for p in -1..=5 {
-            assert_eq!(priority_span(p).width(), 1, "{p}");
-            assert_eq!(priority_text(p).width(), 1, "{p}");
+            assert_eq!(priority_span(p).width(), 2, "{p}");
+            assert_eq!(priority_text(p).width(), 2, "{p}");
         }
     }
 }

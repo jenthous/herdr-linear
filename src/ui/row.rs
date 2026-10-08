@@ -66,7 +66,7 @@ mod tests {
         let line = issue_row(&issue(), 80);
         assert_eq!(
             to_plain(std::slice::from_ref(&line)),
-            "◐ UP-1812     데이터 손상 수정  Bug Backend  @jhhan"
+            "◐ UP-1812      데이터 손상 수정  Bug Backend  @jhhan"
         );
         assert_eq!(line.spans[0].style.fg, Some(Color::Rgb(94, 106, 210)));
         let bug = line.spans.iter().find(|s| s.content == "Bug").unwrap();
@@ -95,7 +95,7 @@ mod tests {
     }
 
     #[test]
-    fn priority_mark_sits_between_identifier_and_title() {
+    fn priority_label_sits_between_identifier_and_title() {
         let row = |p: i64| {
             issue_row(
                 &IssueBuilder::new("i1", "ENG-1", "제목").priority(p).build(),
@@ -103,17 +103,17 @@ mod tests {
             )
         };
         let text = |p: i64| to_plain(&[row(p)]);
-        assert_eq!(text(1), "○ ENG-1     ! 제목");
-        assert_eq!(text(2), "○ ENG-1     ▆ 제목");
-        assert_eq!(text(4), "○ ENG-1     ▂ 제목", "낮음은 가장 낮은 막대");
-        assert_eq!(text(0), "○ ENG-1       제목");
+        assert_eq!(text(1), "○ ENG-1     P0 제목");
+        assert_eq!(text(2), "○ ENG-1     P1 제목");
+        assert_eq!(text(4), "○ ENG-1     P3 제목", "낮음은 P3");
+        assert_eq!(text(0), "○ ENG-1        제목");
         let urgent = row(1);
-        let bang = urgent.spans.iter().find(|s| s.content == "!").unwrap();
-        assert_eq!(bang.style.fg, Some(Color::Red));
+        let p0 = urgent.spans.iter().find(|s| s.content == "P0").unwrap();
+        assert_eq!(p0.style.fg, Some(Color::Red));
     }
 
     #[test]
-    fn narrow_row_keeps_the_priority_mark() {
+    fn narrow_row_keeps_the_priority_label() {
         let i = IssueBuilder::new("i1", "UP-1812", "데이터 손상 수정")
             .priority(2)
             .labels(&["Bug"])
@@ -121,7 +121,7 @@ mod tests {
         for width in [24, 16] {
             let line = issue_row(&i, width);
             let text = to_plain(std::slice::from_ref(&line));
-            assert!(text.starts_with("○ UP-1812   ▆ "), "{text}");
+            assert!(text.starts_with("○ UP-1812   P1 "), "{text}");
             assert!(!text.contains("Bug"), "{text}");
             assert!(line.width() <= usize::from(width), "{text}");
         }
