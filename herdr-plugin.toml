@@ -16,6 +16,13 @@ contexts = ["global", "workspace", "pane", "selection"]
 command = ["./target/release/herdr-linear", "open", "palette"]
 
 [[actions]]
+id = "side"
+title = "Linear: 사이드 pane 열기/닫기"
+description = "오른쪽에 Linear pane을 열거나 닫는다"
+contexts = ["global", "workspace", "pane"]
+command = ["./target/release/herdr-linear", "open", "side"]
+
+[[actions]]
 id = "open-url"
 title = "Linear: 링크로 이슈 열기"
 description = "Ctrl+클릭한 linear.app 이슈 링크를 팔레트에서 연다"
@@ -36,6 +43,12 @@ placement = "popup"
 width = "80%"
 height = "80%"
 command = ["./target/release/herdr-linear", "ui", "--mode", "palette"]
+
+[[panes]]
+id = "side"
+title = "Linear"
+placement = "split"
+command = ["./target/release/herdr-linear", "ui", "--mode", "side"]
 
 [[link_handlers]]
 id = "linear-issue"

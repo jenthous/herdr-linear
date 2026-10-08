@@ -8,7 +8,7 @@ use clap::{Parser, Subcommand};
 
 use crate::config::{self, KeySource, Paths, Settings};
 use crate::context::{Origin, PluginContext};
-use crate::herdr::{Herdr, open_palette};
+use crate::herdr::{Herdr, open_palette, toggle_side};
 use crate::linear::client::{ApiError, LinearClient};
 use crate::linear::filter::{build_issue_filter, token_filter};
 use crate::linear::queries;
@@ -17,6 +17,7 @@ use crate::log::Logger;
 use crate::markdown::{self, Theme};
 use crate::search::query::parse;
 use crate::search::rank::{SearchIndex, merge, sort_mine};
+use crate::side::SidePanes;
 use crate::store::{Store, remove_db_files};
 use crate::ui::relations;
 use crate::ui::row::issue_row;
@@ -59,9 +60,9 @@ pub enum Command {
     },
     /// 이슈 상세 (예: ENG-131)
     Show { id: String },
-    /// herdr 액션: 원래 pane의 맥락을 넘겨 팔레트를 띄운다
+    /// herdr 액션: 원래 pane의 맥락을 넘겨 팔레트를 띄우거나 사이드 pane을 열고 닫는다
     Open {
-        /// palette: 단축키·명령 팔레트, url: Linear 이슈 링크 Ctrl+클릭
+        /// palette: 단축키·명령 팔레트, url: Linear 이슈 링크 Ctrl+클릭, side: 사이드 pane 열기/닫기
         #[arg(value_enum)]
         target: OpenTarget,
     },
@@ -72,16 +73,19 @@ pub enum Command {
     },
 }
 
-/// 둘 다 같은 팔레트를 띄운다. 링크 클릭이면 컨텍스트의 `clicked_url` 이슈로 바로 연다.
+/// palette·url은 같은 팔레트를 띄운다. 링크 클릭이면 컨텍스트의 `clicked_url` 이슈로 바로 연다.
+/// side는 이 워크스페이스의 사이드 pane을 열거나 닫는다.
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OpenTarget {
     Palette,
     Url,
+    Side,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UiMode {
     Palette,
+    Side,
 }
 
 /// 명령 실행에 필요한 것들.
@@ -167,21 +171,31 @@ pub fn run(cli: Cli) -> Result<String> {
             }
             return Ok(out);
         }
-        Command::Open { .. } => {
+        Command::Open { target } => {
             let ctx = PluginContext::parse(
                 &std::env::var("HERDR_PLUGIN_CONTEXT_JSON").unwrap_or_default(),
             );
-            open_palette(
-                &Herdr::from_env(),
-                &Origin::from_context(&ctx),
-                &Logger::new(paths.log_file()),
-            )?;
+            let herdr = Herdr::from_env();
+            let log = Logger::new(paths.log_file());
+            match target {
+                OpenTarget::Side => toggle_side(
+                    &herdr,
+                    &SidePanes::new(&paths.state_dir),
+                    std::env::var("HERDR_WORKSPACE_ID").ok(),
+                    &ctx,
+                    &log,
+                )?,
+                OpenTarget::Palette | OpenTarget::Url => {
+                    open_palette(&herdr, &Origin::from_context(&ctx), &log)?
+                }
+            }
             return Ok(String::new());
         }
-        Command::Ui {
-            mode: UiMode::Palette,
-        } => {
-            crate::tui::palette(paths)?;
+        Command::Ui { mode } => {
+            match mode {
+                UiMode::Palette => crate::tui::palette(paths)?,
+                UiMode::Side => crate::tui::side(paths)?,
+            }
             return Ok(String::new());
         }
         _ => {}
@@ -827,7 +841,17 @@ mod tests {
                 mode: UiMode::Palette
             }
         );
-        assert!(parse(&["open", "side"]).is_err(), "사이드 패널은 3부");
+        assert_eq!(
+            parse(&["open", "side"]).unwrap(),
+            Command::Open {
+                target: OpenTarget::Side
+            }
+        );
+        assert_eq!(
+            parse(&["ui", "--mode", "side"]).unwrap(),
+            Command::Ui { mode: UiMode::Side }
+        );
+        assert!(parse(&["open", "sidebar"]).is_err());
         assert!(parse(&["ui"]).is_err());
     }
 
