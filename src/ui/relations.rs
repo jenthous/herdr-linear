@@ -461,6 +461,27 @@ mod tests {
     }
 
     #[test]
+    fn kind_column_is_aligned_in_every_language() {
+        // 칸 이름이 있는 줄과 비운 줄의 첫 조각이 언어마다 `kind_width` 칸이라, 아이콘·식별자·제목이 세로로 맞는다
+        let all = rows(Some(&parent()), Some(&sample()));
+        for lang in Lang::ALL {
+            with_lang(lang, || {
+                for kind in RelKind::ALL {
+                    let row = all.iter().find(|r| r.kind == kind).expect("kind in sample");
+                    for show_kind in [true, false] {
+                        let line = row_line(row, show_kind, 80);
+                        assert_eq!(
+                            line.spans[0].content.width(),
+                            kind_width(),
+                            "{lang:?} {kind:?} show_kind={show_kind}"
+                        );
+                    }
+                }
+            });
+        }
+    }
+
+    #[test]
     fn english_relations_use_english_labels_and_summary() {
         let (out, _) = with_lang(Lang::En, || lines(Some(&parent()), Some(&sample()), 80));
         let got = text(&out);

@@ -1790,6 +1790,29 @@ mod tests {
     }
 
     #[test]
+    fn onboarding_lines_fit_in_every_language() {
+        // 60칸 pane의 키 입력 칸 글자 영역은 56칸(테두리 2칸 + 안쪽 여백 2칸을 뺀 폭)이라, 안내 줄이 잘리지 않아야 한다
+        for lang in Lang::ALL {
+            with_lang(lang, || {
+                let t = t();
+                for (name, line) in [
+                    ("paste_key", t.paste_key),
+                    ("env_key_invalid", t.env_key_invalid),
+                    ("env_key_fix", t.env_key_fix),
+                    ("key_invalid", t.key_invalid),
+                    ("key_expired_paste", t.key_expired_paste),
+                ] {
+                    assert!(
+                        line.width() <= 56,
+                        "{lang:?} {name}: {} columns: {line}",
+                        line.width()
+                    );
+                }
+            });
+        }
+    }
+
+    #[test]
     fn onboarding_cursor_follows_the_key_label_width() {
         for lang in Lang::ALL {
             with_lang(lang, || {

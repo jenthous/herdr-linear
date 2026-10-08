@@ -294,4 +294,23 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn japanese_catalog_is_translated() {
+        let (ja, en) = (texts_for(Lang::Ja), texts_for(Lang::En));
+        for (a, b) in [
+            (ja.cli_about, en.cli_about),
+            (ja.no_api_key, en.no_api_key),
+            (ja.tab_mine, en.tab_mine),
+            (ja.menu_close, en.menu_close),
+            (ja.rel_blocked_by, en.rel_blocked_by),
+            (ja.hints_list, en.hints_list),
+            (ja.deep_limit, en.deep_limit),
+            (ja.herdr_busy, en.herdr_busy),
+        ] {
+            assert_ne!(a, b);
+        }
+        assert_ne!((ja.minutes_ago)(5), (en.minutes_ago)(5));
+        assert!(!include_str!("ja.rs").contains("..EN"));
+    }
 }
