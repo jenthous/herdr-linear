@@ -11,7 +11,7 @@ pub const DE: Texts = Texts {
     cli_search: "Issues suchen (z. B. Login l:bug s:started @me #ENG p:high)",
     cli_search_deep: "Tiefensuche auf dem Server (mit Kommentaren, bis zu 30 pro Minute)",
     cli_show: "Issue anzeigen (z. B. ENG-131)",
-    cli_open: "herdr-Aktion: Palette mit dem Kontext des ursprünglichen Bereichs öffnen oder Seitenbereich öffnen und schließen",
+    cli_open: "herdr-Aktion: Palette mit dem Kontext des ursprünglichen Bereichs öffnen oder den Seitenbereich ein- und ausblenden",
     cli_open_target: "palette: Tastenkürzel oder Befehlspalette, url: Ctrl+Klick auf einen Linear-Issue-Link, side: Seitenbereich öffnen oder schließen",
     cli_ui: "Oberfläche, die in einem herdr-Bereich läuft",
     write_failed: |e| format!("Fehler: Ausgabe konnte nicht geschrieben werden: {e}"),
@@ -47,12 +47,12 @@ pub const DE: Texts = Texts {
     just_now: "gerade eben",
     minutes_ago: |m| format!("vor {m} Min."),
     hours_ago: |h| format!("vor {h} Std."),
-    days_ago: |d| format!("vor {d} T."),
+    days_ago: |d| format!("vor {d} Tg."),
     rel_parent: "Übergeordnet",
     rel_blocked_by: "Blockiert von",
-    rel_blocking: "Blockiert",
+    rel_blocking: "Blocker für",
     rel_related: "Verwandt",
-    rel_child: "Unter-Issues",
+    rel_child: "Sub-Issues",
     children_over: |total| format!("über {total}"),
     children_all_done: |total| {
         if total == 1 {
@@ -138,14 +138,14 @@ pub const DE: Texts = Texts {
     log_exit: |e| format!("Beendet mit Fehler: {e}"),
     log_panic: |info| format!("Absturz (Panic): {info}"),
     log_palette_start: "Palettenstart",
-    log_side_start: "Seitenbereich-Start",
+    log_side_start: "Seitenbereichs-Start",
     log_side_started: |pane, workspace| {
-        format!("Seitenbereich-Start: Bereich {pane}, Workspace {workspace}")
+        format!("Seitenbereichs-Start: Bereich {pane}, Workspace {workspace}")
     },
-    log_side_no_pane: "Seitenbereich-Start: eigene Bereichs-ID unbekannt, nicht gespeichert",
-    log_side_record: "Seitenbereich-Eintrag",
-    log_side_record_remove: "Entfernen des Seitenbereich-Eintrags",
-    settings_warning: |w| format!("Warnung zu den Einstellungen: {w}"),
+    log_side_no_pane: "Seitenbereichs-Start: eigene Bereichs-ID unbekannt, nicht gespeichert",
+    log_side_record: "Seitenbereichs-Eintrag",
+    log_side_record_remove: "Entfernen des Seitenbereichs-Eintrags",
+    settings_warning: |w| format!("Einstellungen: {w}"),
     status_updating: "Wird aktualisiert…",
     status_offline: "Offline",
     status_error: "Fehler",
@@ -216,7 +216,7 @@ pub const DE: Texts = Texts {
     offline_no_results_for_key: |m| {
         format!("Offline, und für diesen Schlüssel ist nichts gespeichert: {m}")
     },
-    offline_saved_results: |ago, m| format!("Offline: Ergebnisse gespeichert {ago} · {m}"),
+    offline_saved_results: |ago, m| format!("Offline: gespeicherte Ergebnisse von {ago} · {m}"),
     offline_no_results: |m| format!("Offline, und es gibt keine gespeicherten Ergebnisse: {m}"),
     deep_needs_query: "Die Tiefensuche braucht einen Suchbegriff",
     offline_no_issues_for_key: |m| {

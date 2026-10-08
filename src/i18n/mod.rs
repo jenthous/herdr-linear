@@ -353,4 +353,21 @@ mod tests {
         assert_eq!((de.whoami_scope)(2), "Suchbereich: 2 Teams");
         assert!(!include_str!("de.rs").contains("..EN"));
     }
+
+    #[test]
+    fn german_counted_words_use_the_singular_for_one() {
+        let de = texts_for(Lang::De);
+        // `minuten` 도우미를 쓰는 두 문구: 1분은 단수("1 Minute"), 그 밖에는 복수
+        for f in [de.rate_limited_retry_in, de.throttled] {
+            let (one, five) = (f(1), f(5));
+            assert!(
+                one.contains("1 Minute") && !one.contains("Minuten"),
+                "{one}"
+            );
+            assert!(five.contains("5 Minuten"), "{five}");
+        }
+        // 하위가 하나뿐이면 "alle"을 붙이지 않는다
+        assert_eq!((de.children_all_done)(1), "1 erledigt");
+        assert_eq!((de.children_all_done)(3), "alle 3 erledigt");
+    }
 }
