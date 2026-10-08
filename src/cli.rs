@@ -4,11 +4,12 @@ use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 
 use anyhow::{Result, anyhow, bail};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 
 use crate::config::{self, KeySource, Paths, Settings};
 use crate::context::{Origin, PluginContext};
 use crate::herdr::{Herdr, close_side_panes, open_palette, toggle_side};
+use crate::i18n::{self, Lang, t};
 use crate::linear::client::{ApiError, LinearClient};
 use crate::linear::filter::{build_issue_filter, token_filter};
 use crate::linear::queries;
@@ -30,43 +31,78 @@ const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 const SEARCH_LIMIT: usize = 30;
 
 #[derive(Parser, Debug)]
-#[command(
-    name = "herdr-linear",
-    version,
-    about = "herdr에서 Linear를 빠르게 조회"
-)]
+#[command(name = "herdr-linear", version)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
 }
 
+/// 지금 언어의 도움말을 단 명령 정의. 도움말은 문서 주석 대신 카탈로그에서 가져온다.
+pub fn command() -> clap::Command {
+    let t = t();
+    Cli::command()
+        .about(t.cli_about)
+        .mut_subcommand("login", |c| c.about(t.cli_login))
+        .mut_subcommand("logout", |c| c.about(t.cli_logout))
+        .mut_subcommand("whoami", |c| c.about(t.cli_whoami))
+        .mut_subcommand("mine", |c| c.about(t.cli_mine))
+        .mut_subcommand("search", |c| {
+            c.about(t.cli_search)
+                .mut_arg("deep", |a| a.help(t.cli_search_deep))
+        })
+        .mut_subcommand("show", |c| c.about(t.cli_show))
+        .mut_subcommand("open", |c| {
+            c.about(t.cli_open)
+                .mut_arg("target", |a| a.help(t.cli_open_target))
+        })
+        .mut_subcommand("ui", |c| c.about(t.cli_ui))
+}
+
+/// 명령줄을 해석한다. 인자가 틀렸거나 `--help`·`--version`이면 clap이 알리고 끝낸다.
+pub fn parse_args() -> Cli {
+    let matches = command().get_matches();
+    Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit())
+}
+
+/// 명령을 해석하기 전에 설정의 `language`로 이 프로세스의 언어를 정한다. 경로를 정하지 못하면 영어다.
+/// 설정 경고는 여기서 버린다. 명령이 설정을 다시 읽을 때 정한 언어로 알린다.
+pub fn init_language() {
+    let lang = Paths::from_env()
+        .map(|p| config::load_settings(&p.config_file()).0.language)
+        .unwrap_or(Lang::En);
+    i18n::set_lang(lang);
+}
+
+// 도움말 문구는 문서 주석(`///`)이 아니라 `command()`가 카탈로그에서 단다.
 #[derive(Subcommand, Debug, PartialEq, Eq)]
 pub enum Command {
-    /// API 키를 입력하고 검증해 저장한다
+    // API 키를 입력하고 검증해 저장한다
     Login,
-    /// 저장된 API 키와 캐시를 지운다
+    // 저장된 API 키와 캐시를 지운다
     Logout,
-    /// 연결된 계정과 워크스페이스
+    // 연결된 계정과 워크스페이스
     Whoami,
-    /// 나에게 할당된 열린 이슈
+    // 나에게 할당된 열린 이슈
     Mine,
-    /// 이슈 검색 (예: 로그인 l:bug s:진행 @나 #ENG p:high)
+    // 이슈 검색 (예: 로그인 l:bug s:진행 @나 #ENG p:high)
     Search {
-        /// 서버 깊은 검색 (코멘트 포함, 분당 30회 제한)
+        // 서버 깊은 검색 (코멘트 포함, 분당 30회 제한)
         #[arg(long)]
         deep: bool,
         #[arg(required = true, num_args = 1..)]
         query: Vec<String>,
     },
-    /// 이슈 상세 (예: ENG-131)
-    Show { id: String },
-    /// herdr 액션: 원래 pane의 맥락을 넘겨 팔레트를 띄우거나 사이드 pane을 열고 닫는다
+    // 이슈 상세 (예: ENG-131)
+    Show {
+        id: String,
+    },
+    // herdr 액션: 원래 pane의 맥락을 넘겨 팔레트를 띄우거나 사이드 pane을 열고 닫는다
     Open {
-        /// palette: 단축키·명령 팔레트, url: Linear 이슈 링크 Ctrl+클릭, side: 사이드 pane 열기/닫기
+        // palette: 단축키·명령 팔레트, url: Linear 이슈 링크 Ctrl+클릭, side: 사이드 pane 열기/닫기
         #[arg(value_enum)]
         target: OpenTarget,
     },
-    /// herdr pane 안에서 도는 화면
+    // herdr pane 안에서 도는 화면
     Ui {
         #[arg(long, value_enum)]
         mode: UiMode,
@@ -124,14 +160,14 @@ impl Ctx {
     pub fn open(paths: Paths) -> Result<Ctx> {
         let (settings, warnings) = config::load_settings(&paths.config_file());
         for w in warnings {
-            eprintln!("경고: {w}");
+            eprintln!("{}", (t().warning_line)(&w));
         }
         let key = config::resolve_api_key(
             std::env::var("LINEAR_API_KEY").ok(),
             &paths,
             &config::default_credential_fallbacks(),
         )?
-        .ok_or_else(|| anyhow!("API 키가 없어요. 먼저 `herdr-linear login`을 실행하세요"))?;
+        .ok_or_else(|| anyhow!("{}", t().no_api_key))?;
         let now = now_ms();
         let store = open_store(&paths, &settings, now)?;
         let width = ratatui::crossterm::terminal::size()
@@ -736,6 +772,7 @@ fn render_md(ctx: &Ctx, md: &str, theme: &Theme, team_keys: &[String]) -> String
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::i18n::{Lang, with_lang};
     use crate::linear::types::RelatedIssue;
     use crate::test_support::IssueBuilder;
     use mockito::Matcher;
@@ -1509,5 +1546,26 @@ mod tests {
         assert_eq!(line(3), "○ ENG-1     P2 제목");
         assert_eq!(line(4), "○ ENG-1     P3 제목");
         assert_eq!(line(0), "○ ENG-1        제목");
+    }
+
+    #[test]
+    fn help_comes_from_the_catalog() {
+        command().debug_assert();
+        let ko = command().render_help().to_string();
+        assert!(ko.contains("herdr에서 Linear를 빠르게 조회"), "{ko}");
+        let (top, search) = with_lang(Lang::En, || {
+            let mut c = command();
+            let top = c.render_help().to_string();
+            let search = c
+                .find_subcommand_mut("search")
+                .unwrap()
+                .render_help()
+                .to_string();
+            (top, search)
+        });
+        assert!(top.contains("Fast Linear lookup in herdr"), "{top}");
+        assert!(top.contains("List open issues assigned to you"), "{top}");
+        assert!(search.contains("Deep search on the server"), "{search}");
+        assert!(!crate::i18n::has_hangul(&top) && !crate::i18n::has_hangul(&search));
     }
 }

@@ -4,6 +4,7 @@ pub mod cli;
 pub mod config;
 pub mod context;
 pub mod herdr;
+pub mod i18n;
 pub mod linear;
 pub mod log;
 pub mod markdown;

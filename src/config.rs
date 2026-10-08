@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 
+use crate::i18n::{Lang, t};
+
 /// herdr 플러그인 id. 액션은 `jh.linear.<액션>`이 되고, herdr가 주는 설정·상태 디렉터리 이름이 된다.
 pub const PLUGIN_ID: &str = "jh.linear";
 /// 앱 이름. herdr 밖(CLI)에서 쓰는 설정·상태 디렉터리 이름이다.
@@ -37,14 +39,14 @@ impl Paths {
         let config_dir = var("HERDR_PLUGIN_CONFIG_DIR")
             .or_else(|| var("HERDR_LINEAR_CONFIG_DIR"))
             .or_else(|| home.as_ref().map(|h| h.join(".config").join(APP_NAME)))
-            .ok_or_else(|| anyhow!("설정 디렉터리를 정할 수 없어요 (HOME이 없어요)"))?;
+            .ok_or_else(|| anyhow!("{}", t().no_config_dir))?;
         let state_dir = var("HERDR_PLUGIN_STATE_DIR")
             .or_else(|| var("HERDR_LINEAR_STATE_DIR"))
             .or_else(|| {
                 home.as_ref()
                     .map(|h| h.join(".local").join("state").join(APP_NAME))
             })
-            .ok_or_else(|| anyhow!("상태 디렉터리를 정할 수 없어요 (HOME이 없어요)"))?;
+            .ok_or_else(|| anyhow!("{}", t().no_state_dir))?;
         Ok(Paths {
             config_dir,
             state_dir,
@@ -71,6 +73,8 @@ impl Paths {
 /// config.toml 값. 모든 항목은 선택이고 기본값이 있다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
+    /// 화면·CLI 문구의 언어 (`language`). 없거나 모르는 값이면 영어.
+    pub language: Lang,
     /// 범위 팀 키. 비어 있으면 내가 속한 팀 전부.
     pub teams: Vec<String>,
     pub side_refresh_seconds: u64,
@@ -82,6 +86,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
+            language: Lang::En,
             teams: Vec::new(),
             side_refresh_seconds: 60,
             cache_retention_days: 30,
@@ -100,17 +105,26 @@ pub fn load_settings(path: &Path) -> (Settings, Vec<String>) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (s, warnings),
         Err(e) => {
-            warnings.push(format!("config.toml을 읽지 못했어요: {e}"));
+            warnings.push((t().config_read_failed)(&e.to_string()));
             return (s, warnings);
         }
     };
     let table: toml::Table = match toml::from_str(&text) {
         Ok(t) => t,
         Err(e) => {
-            warnings.push(format!("config.toml 형식이 잘못돼서 기본값을 써요: {e}"));
+            warnings.push((t().config_invalid)(&e.to_string()));
             return (s, warnings);
         }
     };
+    if let Some(v) = table.get("language") {
+        match v.as_str() {
+            Some(name) => match Lang::parse(name) {
+                Some(lang) => s.language = lang,
+                None => warnings.push((t().language_unsupported)(name)),
+            },
+            None => warnings.push(t().language_not_string.to_string()),
+        }
+    }
     if let Some(v) = table.get("teams") {
         let keys = v.as_array().and_then(|items| {
             items
@@ -120,7 +134,7 @@ pub fn load_settings(path: &Path) -> (Settings, Vec<String>) {
         });
         match keys {
             Some(keys) => s.teams = keys.into_iter().filter(|k| !k.is_empty()).collect(),
-            None => warnings.push("teams는 문자열 배열이어야 해요. 기본값을 써요".to_string()),
+            None => warnings.push(t().teams_not_list.to_string()),
         }
     }
     read_u64(
@@ -147,7 +161,7 @@ pub fn load_settings(path: &Path) -> (Settings, Vec<String>) {
     if let Some(v) = table.get("agent").and_then(|a| a.get("template")) {
         match v.as_str() {
             Some(t) => s.agent_template = t.to_string(),
-            None => warnings.push("agent.template은 문자열이어야 해요. 기본값을 써요".to_string()),
+            None => warnings.push(t().template_not_string.to_string()),
         }
     }
     (s, warnings)
@@ -166,10 +180,11 @@ fn read_u64(
     };
     match v.as_integer().and_then(|n| u64::try_from(n).ok()) {
         Some(n) if range.contains(&n) => *target = n,
-        _ => warnings.push(format!(
-            "{section}.{key}는 {}~{} 사이의 정수여야 해요. 기본값을 써요",
-            range.start(),
-            range.end()
+        _ => warnings.push((t().int_out_of_range)(
+            section,
+            key,
+            *range.start(),
+            *range.end(),
         )),
     }
 }
@@ -269,7 +284,7 @@ pub fn resolve_api_key(
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => {
-                return Err(e).with_context(|| format!("{}을 읽지 못했어요", path.display()));
+                return Err(e).with_context(|| (t().read_failed)(&path.display().to_string()));
             }
         }
     }
@@ -280,7 +295,7 @@ pub fn resolve_api_key(
 pub fn save_api_key(paths: &Paths, key: &str) -> Result<()> {
     let key = key.trim();
     if key.is_empty() {
-        return Err(anyhow!("빈 키는 저장할 수 없어요"));
+        return Err(anyhow!("{}", t().empty_key));
     }
     ensure_private_dir(&paths.config_dir)?;
     write_private_file(&paths.credentials_file(), format!("{key}\n").as_bytes())
@@ -293,7 +308,7 @@ pub fn delete_credentials(paths: &Paths, fallbacks: &[PathBuf]) -> Result<()> {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => {
-                return Err(e).with_context(|| format!("{}을 지우지 못했어요", path.display()));
+                return Err(e).with_context(|| (t().delete_failed)(&path.display().to_string()));
             }
         }
     }
@@ -302,8 +317,7 @@ pub fn delete_credentials(paths: &Paths, fallbacks: &[PathBuf]) -> Result<()> {
 
 /// 디렉터리를 만들고(없으면) 권한을 0700으로 맞춘다.
 pub fn ensure_private_dir(dir: &Path) -> Result<()> {
-    fs::create_dir_all(dir)
-        .with_context(|| format!("{} 디렉터리를 만들지 못했어요", dir.display()))?;
+    fs::create_dir_all(dir).with_context(|| (t().mkdir_failed)(&dir.display().to_string()))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -339,6 +353,7 @@ pub fn write_private_file(path: &Path, bytes: &[u8]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::i18n::{Lang, with_lang};
     use std::collections::HashMap;
 
     fn env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
@@ -607,5 +622,69 @@ mod tests {
                 PathBuf::from("/home/me/.local/state/herdr/plugins/jh.linear/cache.db"),
             ]
         );
+    }
+
+    #[test]
+    fn reads_language() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "language = \"ja\"\n").unwrap();
+        let (s, w) = load_settings(&path);
+        assert_eq!(s.language, Lang::Ja);
+        assert!(w.is_empty(), "{w:?}");
+    }
+
+    #[test]
+    fn language_defaults_to_english() {
+        let dir = tempfile::tempdir().unwrap();
+        let (s, w) = load_settings(&dir.path().join("config.toml"));
+        assert_eq!(s.language, Lang::En);
+        assert!(w.is_empty());
+    }
+
+    #[test]
+    fn unsupported_or_bad_language_warns_and_uses_english() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "language = \"zh-TW\"\n").unwrap();
+        let (s, w) = load_settings(&path);
+        assert_eq!(s.language, Lang::En);
+        assert_eq!(
+            w,
+            vec![
+                "language = \"zh-TW\"는 지원하지 않아요. 영어를 써요 (en, ko, ja, zh-CN, de)"
+                    .to_string()
+            ]
+        );
+        std::fs::write(&path, "language = 3\n").unwrap();
+        let (s, w) = load_settings(&path);
+        assert_eq!(s.language, Lang::En);
+        assert_eq!(
+            w,
+            vec!["language는 문자열이어야 해요. 영어를 써요".to_string()]
+        );
+        std::fs::write(&path, "language = \"xx\"\n").unwrap();
+        let w = with_lang(Lang::En, || load_settings(&path).1);
+        assert_eq!(
+            w,
+            vec![
+                "language \"xx\" is not supported. Using English (en, ko, ja, zh-CN, de)"
+                    .to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn language_survives_other_bad_keys_but_not_broken_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "language = \"de\"\nteams = 3\n").unwrap();
+        let (s, w) = load_settings(&path);
+        assert_eq!(s.language, Lang::De);
+        assert_eq!(w.len(), 1, "{w:?}");
+        std::fs::write(&path, "language = \"de\"\nteams = [\n").unwrap();
+        let (s, w) = load_settings(&path);
+        assert_eq!(s.language, Lang::En);
+        assert_eq!(w.len(), 1, "{w:?}");
     }
 }
