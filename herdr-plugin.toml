@@ -1,8 +1,8 @@
 id = "jh.linear"
 name = "Linear"
-version = "0.1.2"
+version = "0.2.0"
 min_herdr_version = "0.9.3"
-description = "Fast Linear lookup in herdr: search, read, and open issues from a palette."
+description = "Fast Linear lookup in herdr: search, read, and open issues from a palette or a side pane."
 platforms = ["macos", "linux"]
 
 [[build]]

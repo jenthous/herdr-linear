@@ -31,15 +31,21 @@
 - Open a related issue from the `t` menu or by clicking its line. Esc walks back one issue at a time.
 - `herdr-linear show` prints the same relations, and they stay readable offline.
 
-## 🔜 v0.2 — side panel and actions (next)
+## ✅ v0.2 — side pane
 
-- **Side panel**: one key (`prefix+shift+i`) opens or closes a Linear pane to the right of your work. It starts in list mode and refreshes on its own, every 60 seconds by default.
+- **Side pane**: a second key (`prefix+shift+i`) opens the palette screen in a pane to the right of your work and closes it again. It stays open, refreshes what you're looking at every 60 seconds by default, and only `q` or the key closes it.
+- List rows show Linear-style priority bars in the palette, the side pane, and the CLI.
+- Whatever you can click lights up under the mouse pointer.
+- The screen is redrawn only when something changes, and otherwise once a second, so an idle pane uses almost no CPU.
+
+## 🔜 v0.3 — actions and agent handoff (next)
+
 - **Change issues without leaving the terminal**: status, labels, assignee, comments, and new issues. Changes show up immediately. If Linear rejects one, it is rolled back and the reason is shown.
 - **Send an issue to an agent** (`p`):
   - A template is filled with the issue's title, link, state, labels, description, and recent comments.
   - You can edit it before sending.
   - It is pasted into the agent's pane.
-- **Polish from the v0.1 review**: key-change handling, redraw cost, and other small fixes
+- **Polish from the v0.1 review**: key-change handling and other small fixes
 
 ## Later
 
@@ -95,15 +101,21 @@
 - `t` 메뉴나 줄 클릭으로 관계 이슈를 열고, Esc로 한 단계씩 돌아와요.
 - `herdr-linear show`에도 같은 관계가 나오고, 오프라인에서도 볼 수 있어요.
 
-## 🔜 v0.2 — 사이드 패널과 변경 동작 (다음)
+## ✅ v0.2 — 사이드 pane
 
-- **사이드 패널**: 키 하나(`prefix+shift+i`)로 작업 오른쪽에 Linear pane을 열고 닫아요. 목록 모드로 시작하고 스스로 새로고침해요(기본 60초마다).
+- **사이드 pane**: 키 하나(`prefix+shift+i`)를 더 두면 팔레트 화면을 작업 오른쪽 pane에 열고 닫아요. 상시로 띄워 두고, 보고 있는 것을 스스로 새로 받아요(기본 60초마다). `q`나 그 키로만 닫혀요.
+- 목록 줄에 Linear식 우선순위 막대를 보여 줘요. 팔레트, 사이드 pane, CLI 모두 같아요.
+- 누를 수 있는 곳에 마우스를 올리면 옅게 밝아져요.
+- 바뀐 게 있을 때와 1초에 한 번만 다시 그려서, 가만히 둔 pane은 CPU를 거의 쓰지 않아요.
+
+## 🔜 v0.3 — 변경 동작과 에이전트 전달 (다음)
+
 - **터미널에서 바로 바꾸기**: 상태, 라벨, 담당자, 코멘트, 새 이슈. 바꾼 내용은 바로 보여요. Linear가 거절하면 되돌리고 이유를 보여 줘요.
 - **이슈를 에이전트에게 보내기** (`p`)
   - 이슈의 제목·링크·상태·라벨·본문·최근 코멘트로 템플릿을 채워요.
   - 보내기 전에 고칠 수 있어요.
   - 에이전트 pane에 붙여 넣어요.
-- **v0.1 리뷰에서 미룬 손질**: 키를 바꿀 때 상태 정리, 다시 그리는 비용 등 작은 수정
+- **v0.1 리뷰에서 미룬 손질**: 키를 바꿀 때 상태 정리 등 작은 수정
 
 ## 나중에
 

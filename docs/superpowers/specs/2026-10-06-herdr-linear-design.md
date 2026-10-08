@@ -69,8 +69,8 @@ command = ["./target/release/herdr-linear", "open", "palette"]
 
 [[actions]]
 id = "side"
-title = "Linear: 사이드 패널 열기/닫기"
-description = "오른쪽에 Linear 패널을 열거나 닫는다"
+title = "Linear: 사이드 pane 열기/닫기"
+description = "오른쪽에 Linear pane을 열거나 닫는다"
 contexts = ["global", "workspace", "pane"]
 command = ["./target/release/herdr-linear", "open", "side"]
 
@@ -136,11 +136,11 @@ description = "Linear 사이드 패널"
   - `HERDR_PLUGIN_CONTEXT_JSON`에서 `focused_pane_id`, `focused_pane_agent`, `focused_pane_cwd`(없으면 `workspace_cwd`), `selected_text`를 읽는다.
   - 읽은 값을 `herdr plugin pane open --plugin herdr-linear --entrypoint palette --focus`에 `--env`로 넘긴다. 넘기는 변수는 `HERDR_LINEAR_ORIGIN_PANE`, `HERDR_LINEAR_ORIGIN_AGENT`, `HERDR_LINEAR_ORIGIN_CWD`, `HERDR_LINEAR_OPEN`이다.
   - `selected_text`가 이슈 식별자 형식(`[A-Za-z][A-Za-z0-9]*-[0-9]+`)이면 `HERDR_LINEAR_OPEN`에 넣는다. 팔레트는 그 이슈의 상세 화면으로 시작한다.
-- **`open side`**
-  - state 디렉터리의 `side-panes.json`(workspace id → pane id)을 확인한다.
-  - 기록된 pane이 살아 있으면(`herdr pane get` 성공) `herdr pane close`로 닫는다.
-  - 없으면 `herdr plugin pane open --plugin herdr-linear --entrypoint side --placement split --direction right --focus`로 연다.
-  - 사이드 패널 프로세스는 시작할 때 자기 `HERDR_PANE_ID`를 이 파일에 기록하고, 종료할 때 지운다.
+- **`open side`** (자세한 흐름은 `docs/superpowers/specs/2026-10-08-side-pane-design.md` 7장)
+  - 워크스페이스 id는 `HERDR_WORKSPACE_ID`, 컨텍스트 JSON의 `workspace_id`, 포커스된 pane의 `herdr pane get` 순서로 얻는다.
+  - state 디렉터리의 `side-panes.json`(workspace id → pane id)에 그 워크스페이스 pane이 있으면 `herdr pane process-info`로 그 pane에서 도는 명령을 본다. 우리 사이드 화면(`herdr-linear ui --mode side`)이면 `herdr plugin pane close`로 닫고, 아니면 기록만 지운다(그 pane은 닫지 않는다).
+  - 닫지 않았으면 `herdr plugin pane open --plugin jh.linear --entrypoint side --placement split --direction right --focus`에 팔레트와 같은 `--env`를 붙여 연다.
+  - 사이드 패널 프로세스는 시작할 때 자기 pane id(`HERDR_PANE_ID`, 없으면 `herdr pane current`)를 이 파일에 기록하고, 정상 종료할 때 자기 기록만 지운다.
 - **`open url`**: 컨텍스트의 `clicked_url`에서 식별자를 뽑아 `HERDR_LINEAR_OPEN`으로 팔레트를 연다.
 - **`logout`**: `credentials`와 `cache.db`를 지우고 `herdr notification show`로 결과를 알린다.
 - popup 열기가 `ui_busy`로 거절되면 `herdr notification show`로 알린다. 설정 화면, 복사 모드, 다른 모달이 떠 있을 때 이렇게 된다.
@@ -181,29 +181,15 @@ Linear   [내 이슈]  최근 본  전체                              2분 전 
 - 왼쪽 목록에서 선택을 옮기면 오른쪽 미리보기가 바로 바뀐다.
 - 상태 아이콘(◇ triage, ◌ backlog, ○ unstarted, ◐ started, ● completed, ✕ canceled·duplicate)과 라벨에는 Linear에 설정된 색을 그대로 쓴다.
 - 팝업 폭이 100칸 미만이면 미리보기를 숨기고 목록만 보여준다.
+- 목록 줄은 식별자 뒤에 우선순위 칸(3칸)을 둔다. 긴급은 빨간 `!`, 높음·보통·낮음은 `▂▄▆` 중 3·2·1개를 밝히고 나머지는 흐리게, 없음은 빈칸이다(사이드 pane 설계 4장).
 
 ### 4.2 사이드 패널
 
-오른쪽 split이고 목록 모드로 시작한다.
+오른쪽 split이고, 화면은 팔레트와 같다. 검색 모드로 시작하고, 넓으면 목록·미리보기를 가로로 놓고, 상세에는 관계 칸이 있다. 자세한 것은 `docs/superpowers/specs/2026-10-08-side-pane-design.md`.
 
-```
-Linear  [내 이슈]  최근 본  전체
- 현재 브랜치
-   ◐ ENG-142  로그인 세션 만료 처리
- ───────────
- ▶ ◐ ENG-131  로그인 버튼 비활성 버그
-   ○ ENG-140  결제 페이지 리팩터링
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- ENG-131  로그인 버튼 비활성 버그
- ◐ In Progress  ↑ High  김민수
- bug  frontend
-
- 재현 방법
-  1. 로그인 후 30분 대기
-```
-
-- 목록은 위에, 미리보기는 아래에 둔다. 패널 높이가 24줄 미만이면 미리보기를 숨긴다.
-- 보이는 목록을 `side.refresh_seconds`(기본 60초)마다 다시 불러온다. 0이면 자동 새로고침을 끈다.
+- 목록 모드에서 Esc로 닫히지 않는다. `q`·Ctrl+C나 열고 닫는 키로 닫는다.
+- 지금 보이는 것을 `side.refresh_seconds`(기본 60초)마다 다시 불러온다. 상세는 그 상세, 검색어가 있으면 서버 검색, 그 밖에는 지금 탭과 현재 브랜치 이슈다. 0이면 자동 새로고침을 끈다.
+- 앞 요청을 기다리는 중이거나, 한도로 자동 요청을 멈췄거나, 키 입력 화면이면 그 회차를 건너뛴다. `r`을 누르면 다음 자동 새로고침은 그때부터 한 주기 뒤다.
 
 ### 4.3 상단 상태 표시
 
@@ -263,10 +249,10 @@ Linear  [내 이슈]  최근 본  전체
 
 | 모드 | 키 |
 |---|---|
-| 검색 모드 (팔레트 기본) | 글자 입력 = 검색어, ↑/↓ 또는 Ctrl+P/Ctrl+N = 이동, Enter = 상세, Tab/Shift+Tab = 보기 전환, Ctrl+K = 액션 메뉴, Esc = 목록 모드 |
-| 목록 모드 (사이드 패널 기본) | j/k·↑/↓ = 이동, g/G = 처음/끝, `/` = 검색 모드, Enter = 상세, Tab = 보기 전환, `r` = 새로고침, `s` 상태, `l` 라벨, `a` 담당자, `c` 코멘트, `p` 에이전트 전달, `n` 새 이슈, `o` 브라우저, `y` 티켓 URL 복사, `Y` 열린 PR 링크 복사(ID 복사는 Ctrl+K 메뉴), Ctrl+K = 액션 메뉴, `q` = 닫기(팔레트는 Esc도 닫기) |
+| 검색 모드 (팔레트·사이드 패널 기본) | 글자 입력 = 검색어, ↑/↓ 또는 Ctrl+P/Ctrl+N = 이동, Enter = 상세, Tab/Shift+Tab = 보기 전환, Ctrl+K = 액션 메뉴, Esc = 목록 모드 |
+| 목록 모드 | j/k·↑/↓ = 이동, g/G = 처음/끝, `/` = 검색 모드, Enter = 상세, Tab = 보기 전환, `r` = 새로고침, `s` 상태, `l` 라벨, `a` 담당자, `c` 코멘트, `p` 에이전트 전달, `n` 새 이슈, `o` 브라우저, `y` 티켓 URL 복사, `Y` 열린 PR 링크 복사(ID 복사는 Ctrl+K 메뉴), Ctrl+K = 액션 메뉴, `q` = 닫기(팔레트는 Esc도 닫기, 사이드 패널은 Esc로 닫지 않음) |
 | 상세 화면 | j/k = 스크롤, Ctrl+D/Ctrl+U = 반 페이지, g/G = 처음/끝, `t` = 관계 메뉴, `u` = 본문 링크·이미지 목록, `r` = 새로고침, 목록 모드와 같은 동작 키, Esc = 뒤로(관계 이슈에서 왔으면 앞 이슈로), `q` = 닫기 |
-| 마우스 | 휠 = 목록 이동·상세 스크롤·메뉴 이동, 줄 클릭 = 선택(선택된 줄을 다시 클릭하면 상세), 탭 이름 클릭 = 보기 전환, 메뉴 항목 클릭 = 실행, 상세의 관계 줄 클릭 = 그 이슈 열기 |
+| 마우스 | 휠 = 목록 이동·상세 스크롤·메뉴 이동, 줄 클릭 = 선택(선택된 줄을 다시 클릭하면 상세), 탭 이름 클릭 = 보기 전환, 메뉴 항목 클릭 = 실행, 상세의 관계 줄 클릭 = 그 이슈 열기, 누를 수 있는 곳에 올리면 옅게 밝힘(고른 줄은 선택 색 그대로) |
 | 메뉴(상태·라벨·담당자·액션) | 글자 입력 = 거르기, ↑/↓ = 이동, Enter = 적용, Space = 켜기/끄기(라벨), Esc = 취소 |
 | 입력(코멘트·새 이슈·에이전트 전달) | Ctrl+S = 보내기, Ctrl+E = 외부 편집기, Tab = 다음 칸(새 이슈), Esc = 취소(내용이 있으면 확인) |
 
@@ -308,7 +294,7 @@ pulldown-cmark(GFM 표·취소선·체크박스 옵션 켬)로 파싱해 ratatui
 | `config.toml` | `HERDR_PLUGIN_CONFIG_DIR` | 사용자 설정(11장) |
 | `credentials` | `HERDR_PLUGIN_CONFIG_DIR`, 권한 0600 | API 키 한 줄 |
 | `cache.db` | `HERDR_PLUGIN_STATE_DIR`, 권한 0600 | SQLite 캐시(WAL 모드) |
-| `side-panes.json` | `HERDR_PLUGIN_STATE_DIR` | workspace id → 사이드 패널 pane id |
+| `side-panes.json` | `HERDR_PLUGIN_STATE_DIR`, 권한 0600 | workspace id → 사이드 패널 pane id. 임시 파일에 쓰고 이름을 바꾼다. 읽지 못하면 빈 기록으로 본다 |
 | `herdr-linear.log` | `HERDR_PLUGIN_STATE_DIR` | 로그. 키는 남기지 않는다. 1MB를 넘으면 `.1`로 하나 백업하고 새로 쓴다 |
 
 herdr 밖에서 실행할 때(개발·테스트)는 `HERDR_LINEAR_CONFIG_DIR`과 `HERDR_LINEAR_STATE_DIR` 환경 변수를 쓴다. 그것도 없으면 `~/.config/herdr-linear`와 `~/.local/state/herdr-linear`를 쓴다.
@@ -551,7 +537,7 @@ Linear 이슈 {identifier}: {title}
 teams = []                 # 비우면 내가 속한 팀 전부
 
 [side]
-refresh_seconds = 60       # 0이면 자동 새로고침 끔
+refresh_seconds = 60       # 사이드 패널 자동 새로고침 주기(0~3600초). 0이면 끔
 
 [cache]
 retention_days = 30
