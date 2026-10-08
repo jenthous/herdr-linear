@@ -19,7 +19,7 @@
 ## Funktionen
 
 - **Tabs**: eigene offene Issues · zuletzt angesehen · alle Issues der eigenen Teams, dargestellt in den Status- und Label-Farben von Linear.
-- **Seitenbereich**: Mit einer zweiten Taste öffnet sich dieselbe Ansicht rechts neben der Arbeit in einem eigenen Bereich; dieselbe Taste schließt ihn wieder. Der Bereich bleibt offen und aktualisiert das gerade Angezeigte standardmäßig alle 60 Sekunden. Im Listenmodus schließt Esc ihn nicht, `q` schon.
+- **Seitenbereich**: Mit einer zweiten Taste öffnet sich dieselbe Ansicht in einem eigenen Bereich rechts neben dem aktuellen; dieselbe Taste schließt den Seitenbereich wieder. Er bleibt offen und aktualisiert das gerade Angezeigte standardmäßig alle 60 Sekunden. Im Listenmodus schließt Esc ihn nicht, `q` schon.
 - **Priorität**: ein Label hinter der Issue-ID, dringendste zuerst: rot `P0` dringend, orange `P1` hoch, gelb `P2` mittel, grau `P3` niedrig. Das Such-Token `p:` nimmt weiterhin Linears Zahlen oder Namen (`p:1` oder `p:urgent` ist P0).
 - **Suche während der Eingabe**: Zwischengespeicherte Issues werden sofort durchsucht. Nach 300 ms Pause wird auch der Server durchsucht und die Ergebnisse werden zusammengeführt. Der Eintrag „⏎ Auf dem Server suchen (mit Kommentaren)“ am Ende der Liste durchsucht auch die Kommentare.
 - **Issue-Details**: Markdown-Beschreibung (Überschriften, Listen, Codeblöcke, Tabellen), Kommentare und eine Linkliste. Ein offener PR steht ganz oben.
@@ -117,7 +117,7 @@ refresh_seconds = 60     # wie oft der Seitenbereich aktualisiert wird (0 bis 36
 retention_days = 30      # Issues, die so lange weder geladen noch angesehen wurden, werden aus dem Cache entfernt
 ```
 
-Die Sprache gilt ab dem nächsten Start der Palette, des Seitenbereichs oder der CLI. Auch Regionskennungen wie `de-DE` oder `ja_JP` funktionieren. Die eigenständige CLI liest eine eigene Datei, `~/.config/herdr-linear/config.toml`; bei Nutzung beider `language` auch dort setzen.
+Die Sprache gilt ab dem nächsten Start der Palette, des Seitenbereichs oder der CLI. Auch Regionskennungen wie `de-DE` oder `ja_JP` funktionieren. Die eigenständige CLI liest eine eigene Datei, `~/.config/herdr-linear/config.toml`; bei Nutzung beider `language` auch dort setzen. Aktionsnamen in der Befehlspalette von herdr stammen aus dem Plugin-Manifest und bleiben englisch.
 
 ## Dateien
 
@@ -158,7 +158,7 @@ scripts/deploy-local.sh   # eine stabile Kopie für den täglichen Gebrauch auf 
 
 `scripts/deploy-local.sh` kopiert das gebaute Plugin nach `~/.local/share/herdr-linear/plugin`, verlinkt es in herdr und verlinkt den Befehl `herdr-linear` nach `~/.local/bin`. Danach ändert die Arbeit im Repository das täglich genutzte Plugin nicht mehr.
 
-Zum Neuerzeugen der Screenshots `cargo run --example screenshots` ausführen. Die Bilder werden aus Testdaten gezeichnet und in `docs/images/<language>/` geschrieben.
+Zum erneuten Erzeugen der Screenshots `cargo run --example screenshots` ausführen. Die Bilder werden aus Testdaten gezeichnet und in `docs/images/<language>/` geschrieben.
 
 Für ein Release `version` in `Cargo.toml` und `herdr-plugin.toml` erhöhen, `cargo test` ausführen, damit Cargo `Cargo.lock` aktualisiert, committen und zuerst den Tag `vX.Y.Z` pushen. Sobald der Release-Workflow die Binaries und Prüfsummen angehängt hat, `main` pushen.
 

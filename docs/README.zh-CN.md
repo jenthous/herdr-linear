@@ -20,7 +20,7 @@
 
 - **标签页**：我的未完成议题 · 最近查看 · 所在团队的全部议题。状态和标签按 Linear 中设置的颜色显示。
 - **侧边窗格**：用第二个按键在工作窗格的右侧打开同样的界面，再按一次即可关闭。它会一直开着，默认每 60 秒刷新你正在查看的内容。在列表模式下，Esc 不会关闭它，按 `q` 才会。
-- **优先级**：议题 ID 后面带有标签，按紧急程度从高到低：红色 `P0` 紧急，橙色 `P1` 高，黄色 `P2` 中，灰色 `P3` 低。搜索标记 `p:` 仍然接受 Linear 的数字或名称 (`p:1` 或 `p:urgent` 即 P0)。
+- **优先级**：议题 ID 后面带有优先级标识，按紧急程度从高到低：红色 `P0` 紧急，橙色 `P1` 高，黄色 `P2` 中，灰色 `P3` 低。搜索标记 `p:` 仍然接受 Linear 的数字或名称 (`p:1` 或 `p:urgent` 即 P0)。
 - **边输入边搜索**：已缓存的议题会即时搜索。停顿 300 毫秒后，也会搜索服务器并合并结果。选择列表底部的“⏎ 在服务器上搜索 (含评论)”，可以连评论一起搜索。
 - **议题详情**：Markdown 正文 (标题、列表、代码块、表格)、评论和链接列表。打开的 PR 显示在最上方。
 - **关联议题**：详情页按 Linear 的状态色显示关联议题，分为父议题、子议题、被阻塞、阻塞和相关。按 `t` 打开关联议题菜单，或点击某一行打开该议题，按 Esc 返回。
@@ -43,7 +43,7 @@
 herdr plugin install jenthous/herdr-linear
 ```
 
-在 macOS 和 Linux 上，会从 GitHub Releases 下载预编译的二进制文件，并校验其 SHA-256 校验和。如果无法下载，则用 Cargo 从源码构建。
+在 macOS 和 Linux 上，会从 GitHub Releases 下载预编译的二进制文件，并校验其 SHA-256 校验和。如果无法完成下载或校验，则用 Cargo 从源码构建。
 
 插件无法自行注册按键。请在 `~/.config/herdr/config.toml` 中添加按键绑定：
 
@@ -117,7 +117,7 @@ refresh_seconds = 60     # 侧边窗格的刷新间隔 (0 到 3600 秒)；0 表�
 retention_days = 30      # 超过这么多天既没有获取也没有查看过的议题，会从缓存中清除
 ```
 
-语言设置会在下次启动面板、侧边窗格或 CLI 时生效。`de-DE`、`ja_JP` 这样的地区标签也可以使用。独立运行的 CLI 读取它自己的配置文件 `~/.config/herdr-linear/config.toml`；如果两者都用，请在那里也设置 `language`。
+语言设置会在下次启动面板、侧边窗格或 CLI 时生效。`de-DE`、`ja_JP` 这样的地区标签也可以使用。独立运行的 CLI 读取它自己的配置文件 `~/.config/herdr-linear/config.toml`；如果两者都用，请在那里也设置 `language`。herdr 命令面板中显示的操作名称来自插件清单 (manifest)，因此保持为英文。
 
 ## 文件
 
@@ -158,7 +158,7 @@ scripts/deploy-local.sh   # 在本机构建并链接一份稳定的副本，供�
 
 `scripts/deploy-local.sh` 会把构建好的插件复制到 `~/.local/share/herdr-linear/plugin`，将其链接到 herdr，并把 `herdr-linear` 命令链接到 `~/.local/bin`。此后在仓库中开发，不会影响你日常使用的插件。
 
-要重新生成截图，运行 `cargo run --example screenshots`。截图由虚构数据绘制，并写入 `docs/images/<language>/`。
+要重新生成截图，运行 `cargo run --example screenshots`。截图由模拟数据绘制，并写入 `docs/images/<language>/`。
 
 发布时，递增 `Cargo.toml` 和 `herdr-plugin.toml` 中的 `version`，运行 `cargo test` 让 Cargo 更新 `Cargo.lock`，提交，并先推送标签 `vX.Y.Z`。发布工作流附上二进制文件和校验和之后，再推送 `main`。
 

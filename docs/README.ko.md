@@ -26,7 +26,7 @@
 - **입력하는 대로 검색**: 캐시에서 바로 찾아요. 입력이 0.3초 멈추면 서버에서도 찾아 합쳐요. 목록 맨 아래 "⏎ 서버에서 검색 (코멘트 포함)"을 고르면 코멘트까지 찾아요.
 - **상세**: markdown 본문(제목, 목록, 코드 블록, 표), 코멘트, 링크 목록을 보여 줘요. 열린 PR은 맨 위에 보여요.
 - **관계**: 상세에 상위·하위·막힘·막는 중·관련 이슈를 Linear 상태 색으로 보여 줘요. `t`로 관계 메뉴를 열거나 줄을 클릭하면 그 이슈로 가고, Esc로 돌아와요.
-- **복사**: `y`는 티켓 URL, `Y`는 열린 PR 링크를 복사해요. OSC 52로 복사해서 herdr에 원격으로 붙어 있어도 지금 쓰는 컴퓨터의 클립보드로 와요.
+- **복사**: `y`는 이슈 URL, `Y`는 열린 PR 링크를 복사해요. OSC 52로 복사해서 herdr에 원격으로 붙어 있어도 지금 쓰는 컴퓨터의 클립보드로 와요.
 - **현재 브랜치**: 지금 pane의 브랜치(`me/eng-123-...`)에 연결된 이슈를 맨 위에 고정해요.
 - **링크**: herdr에서 linear.app 이슈 링크를 Ctrl+클릭하면 팔레트에서 열려요. 이슈 식별자(`ENG-123`)를 선택한 채로 열면 그 이슈로 바로 가요.
 - **마우스**: 휠로 이동·스크롤하고, 줄을 클릭해 고르고, 고른 줄을 다시 클릭해 열어요. 누를 수 있는 곳에 마우스를 올리면 옅게 밝아져요.
@@ -54,20 +54,20 @@ macOS·Linux에서는 GitHub Releases에서 미리 빌드한 바이너리를 받
 key = "prefix+i"
 type = "plugin_action"
 command = "jh.linear.palette"
-description = "Linear search"
+description = "Linear 검색"
 
 [[keys.command]]
 key = "prefix+shift+i"
 type = "plugin_action"
 command = "jh.linear.side"
-description = "Linear side pane"
+description = "Linear 사이드 pane"
 
 # 한글 입력 중에도 바로 쓰는 키 (선택)
 [[keys.command]]
 key = "ctrl+alt+i"
 type = "plugin_action"
 command = "jh.linear.palette"
-description = "Linear search"
+description = "Linear 검색"
 ```
 
 `jh.linear.side`에도 같은 방법으로 직접 키를 둘 수 있어요. 액션은 command-palette 플러그인에도 나타나요.
@@ -84,7 +84,7 @@ Linear → Settings → Security & access → Personal API keys에서 키를 만
 | 모드 | 키 |
 |---|---|
 | 검색 (기본) | 글자 = 검색어, ↑/↓·Ctrl+P/N = 이동, Enter = 상세, Tab/Shift+Tab = 탭, Ctrl+K = 동작 메뉴, Esc = 목록 모드 |
-| 목록 | j/k = 이동, g/G = 처음/끝, `/` = 검색, Enter = 상세, `y` = 티켓 URL 복사, `Y` = 열린 PR 링크 복사, `r` = 새로고침, `o` = 브라우저, `q`·Esc = 닫기(사이드 pane은 Esc로 닫히지 않아요) |
+| 목록 | j/k = 이동, g/G = 처음/끝, `/` = 검색, Enter = 상세, `y` = 이슈 URL 복사, `Y` = 열린 PR 링크 복사, `r` = 새로고침, `o` = 브라우저, `q`·Esc = 닫기(사이드 pane은 Esc로 닫히지 않아요) |
 | 상세 | j/k = 스크롤, Ctrl+D/U = 반 페이지, g/G = 처음/끝, `t` = 관계, `u` = 링크 목록, `y`·`Y`·`o`·`r`, Esc = 뒤로, `q` = 닫기 |
 
 - ID 복사는 Ctrl+K 메뉴에 있어요. 메뉴 맨 위는 URL 복사예요.
@@ -119,7 +119,7 @@ refresh_seconds = 60     # 사이드 pane 새로고침 주기(0~3600초). 0이�
 retention_days = 30      # 이 기간 동안 안 받고 안 본 이슈는 캐시에서 지워요
 ```
 
-화면 기본 언어가 영어로 바뀌었어요. 지금처럼 한국어로 쓰려면 `language = "ko"`를 두세요. 팔레트·사이드 pane·CLI를 다음에 열 때부터 적용돼요. `de-DE`, `ja_JP` 같은 지역 태그도 받아요. 단독 CLI는 설정 파일이 따로라서 `~/.config/herdr-linear/config.toml`을 읽어요. 둘 다 쓰면 거기에도 `language`를 두세요.
+화면 기본 언어가 영어로 바뀌었어요. 지금처럼 한국어로 쓰려면 `language = "ko"`를 두세요. 팔레트·사이드 pane·CLI를 다음에 열 때부터 적용돼요. `de-DE`, `ja_JP` 같은 지역 태그도 받아요. 단독 CLI는 설정 파일이 따로라서 `~/.config/herdr-linear/config.toml`을 읽어요. 둘 다 쓰면 거기에도 `language`를 두세요. herdr 명령 팔레트에 보이는 액션 이름은 플러그인 매니페스트에서 가져오기 때문에 영어 그대로예요.
 
 ## 파일
 
@@ -144,7 +144,7 @@ herdr-linear show ENG-123
 
 ## 문제 해결
 
-- **팔레트가 안 열려요**: herdr 설정 화면이나 복사 모드가 떠 있으면 팝업을 열 수 없어요. 닫고 다시 눌러요.
+- **팔레트가 안 열려요**: herdr 설정 화면, 복사 모드 같은 다른 창이 떠 있으면 팝업을 열 수 없어요. 닫고 다시 눌러요.
 - **사이드 pane이 안 열리거나 안 닫혀요**: 이유가 herdr 알림과 `herdr-linear.log`에 남아요. 사이드 pane을 다른 방법으로 닫았으면 키를 누를 때 새로 열려요.
 - **"오프라인"**: 저장된 내용으로 계속 보여 주고, 다음 조회 때 다시 시도해요.
 - **"Linear API 한도를 넘었어요"**: 아래에 잠깐 뜨는 안내에 언제 다시 시도할지 나와요. 그때까지 자동 서버 검색은 멈추고, 캐시 검색은 계속 돼요.
