@@ -899,6 +899,9 @@ C3이 성공한 뒤 `main`에서 새 브랜치 `docs/roadmap-v0.2.1`을 만들�
 
 **Files:**
 - Modify: `ROADMAP.md`
+- Modify: `README.md` (릴리스 문단, Task 3 리뷰 반영)
+- Modify: `docs/superpowers/specs/2026-10-06-herdr-linear-design.md` (17장)
+- Modify: `docs/superpowers/specs/2026-10-09-prebuilt-binaries-design.md` (7장)
 
 - [ ] **Step 1: 영어 부분을 고친다**
 
@@ -938,14 +941,66 @@ C3이 성공한 뒤 `main`에서 새 브랜치 `docs/roadmap-v0.2.1`을 만들�
 - GitHub Releases에 미리 빌드한 바이너리와 체크섬을 올려서, Rust 없이도 설치되게 해요. 소스 빌드는 대체 수단으로 남겨요.
 ```
 
-- [ ] **Step 3: 커밋한다**
+- [ ] **Step 3: README의 릴리스 문단을 다듬는다** (Task 3 리뷰 반영)
+
+찾아 바꾼다.
+
+```markdown
+To release, bump `version` in `Cargo.toml` and `herdr-plugin.toml` (Cargo updates `Cargo.lock`), commit, and push the tag `vX.Y.Z` first.
+```
+
+```markdown
+To release, bump `version` in `Cargo.toml` and `herdr-plugin.toml`, run `cargo test` so Cargo updates `Cargo.lock`, commit, and push the tag `vX.Y.Z` first.
+```
+
+한국어는 릴리스 문단을 `deploy-local.sh` 설명 문단 뒤로 옮기고 문구를 고친다. 찾아 바꾼다.
+
+```markdown
+릴리스는 `Cargo.toml`과 `herdr-plugin.toml`의 `version`을 올려(`Cargo.lock`은 Cargo가 맞춰요) 커밋하고, `vX.Y.Z` 태그를 먼저 push해요. 릴리스 워크플로가 바이너리와 체크섬을 올리면 그다음에 `main`을 push해요.
+
+`scripts/deploy-local.sh`는 빌드한 플러그인을 `~/.local/share/herdr-linear/plugin`에 복사해 herdr에 연결하고, `herdr-linear` 명령을 `~/.local/bin`에 연결해요. 그 뒤로는 저장소에서 개발해도 쓰고 있는 플러그인이 바뀌지 않아요.
+```
+
+```markdown
+`scripts/deploy-local.sh`는 빌드한 플러그인을 `~/.local/share/herdr-linear/plugin`에 복사해 herdr에 연결하고, `herdr-linear` 명령을 `~/.local/bin`에 연결해요. 그 뒤로는 저장소에서 개발해도 쓰고 있는 플러그인이 바뀌지 않아요.
+
+릴리스는 `Cargo.toml`과 `herdr-plugin.toml`의 `version`을 올리고 `cargo test`를 돌려 `Cargo.lock`도 맞춘 뒤 커밋하고, `vX.Y.Z` 태그를 먼저 push해요. 릴리스 워크플로가 바이너리와 체크섬을 올리면 그다음에 `main`을 push해요.
+```
+
+- [ ] **Step 4: 바탕 스펙 17장에 완료를 적는다**
+
+`docs/superpowers/specs/2026-10-06-herdr-linear-design.md`에서 찾아 바꾼다.
+
+```markdown
+  - 릴리스 바이너리와 체크섬. `[[build]]`는 바이너리를 받아오고, 실패하면 cargo로 빌드한다.
+```
+
+```markdown
+  - 릴리스 바이너리와 체크섬. `[[build]]`는 바이너리를 받아오고, 실패하면 cargo로 빌드한다. (v0.2.1에 완료: `docs/superpowers/specs/2026-10-09-prebuilt-binaries-design.md`)
+```
+
+- [ ] **Step 5: 바이너리 설계 7장의 릴리스 순서를 맞춘다**
+
+`docs/superpowers/specs/2026-10-09-prebuilt-binaries-design.md`에서 찾아 바꾼다(6장과 README는 태그를 먼저 올린다).
+
+```markdown
+  - 개발: 릴리스 방법을 한 줄로 적는다. 두 파일의 버전을 올려 main에 push하고 `vX.Y.Z` 태그를 push하면 워크플로가 바이너리를 올린다.
+```
+
+```markdown
+  - 개발: 릴리스 방법을 한 줄로 적는다. 두 파일의 버전을 올리고 cargo로 `Cargo.lock`을 맞춰 커밋한 뒤 `vX.Y.Z` 태그를 먼저 push하고, 워크플로가 바이너리를 올리면 main을 push한다.
+```
+
+- [ ] **Step 6: 커밋한다**
 
 Run: `grep -c "Prebuilt binaries with checksums\|미리 빌드한 바이너리와 체크섬을 올려서" ROADMAP.md`
 Expected: `0`
 
+Run: `cargo test` (문서만 바뀌었으니 그대로 통과해야 한다)
+
 ```bash
-git add ROADMAP.md
-git commit -m "docs: ROADMAP — v0.2.1 미리 빌드한 바이너리 완료" -m "<your Co-Authored-By trailer>"
+git add ROADMAP.md README.md docs/superpowers/specs/2026-10-06-herdr-linear-design.md docs/superpowers/specs/2026-10-09-prebuilt-binaries-design.md
+git commit -m "docs: ROADMAP — v0.2.1 미리 빌드한 바이너리 완료, 릴리스 안내 다듬기" -m "<your Co-Authored-By trailer>"
 ```
 
 컨트롤러가 `main`에 fast-forward 머지하고 push한다.
