@@ -1800,6 +1800,7 @@ mod tests {
                     ("env_key_invalid", t.env_key_invalid),
                     ("env_key_fix", t.env_key_fix),
                     ("key_invalid", t.key_invalid),
+                    ("key_offline", t.key_offline),
                     ("key_expired_paste", t.key_expired_paste),
                 ] {
                     assert!(
