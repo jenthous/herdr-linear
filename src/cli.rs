@@ -1568,4 +1568,25 @@ mod tests {
         assert!(search.contains("Deep search on the server"), "{search}");
         assert!(!crate::i18n::has_hangul(&top) && !crate::i18n::has_hangul(&search));
     }
+
+    #[test]
+    fn every_subcommand_gets_help_in_every_language() {
+        // `command()`의 `mut_subcommand` 사슬에서 빠진 하위 명령은 도움말이 없어서 여기서 걸린다
+        let check = |label: &str| {
+            let cmd = command();
+            assert!(
+                cmd.get_subcommands().next().is_some(),
+                "{label}: 하위 명령이 하나도 없어요"
+            );
+            for sub in cmd.get_subcommands() {
+                assert!(
+                    sub.get_about().is_some(),
+                    "{label}: `{}`에 도움말이 없어요. command()에 mut_subcommand를 더하세요",
+                    sub.get_name()
+                );
+            }
+        };
+        check("ko");
+        with_lang(Lang::En, || check("en"));
+    }
 }

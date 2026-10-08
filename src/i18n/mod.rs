@@ -46,11 +46,14 @@ impl Lang {
     }
 
     /// 설정 값을 언어로 바꾼다. 대소문자·앞뒤 공백·`_`/`-`는 가리지 않고,
+    /// POSIX 로캘의 꼬리(`.UTF-8`, `@euro`)는 떼고,
     /// 지역 태그(`de-DE`, `ja_JP`, `zh-Hans-CN`)는 앞부분으로 본다.
-    /// 번체 중국어(`zh-TW`, `zh-HK`, `zh-Hant` 등)와 모르는 값은 `None`이다.
+    /// 번체 중국어(`zh-TW`, `zh-HK`, `zh-Hant`, `zh_TW.UTF-8` 등)와 모르는 값은 `None`이다.
     pub fn parse(value: &str) -> Option<Lang> {
-        let v = value.trim().to_lowercase().replace('_', "-");
-        match v.as_str() {
+        let lowered = value.trim().to_lowercase().replace('_', "-");
+        // `zh_TW.UTF-8`의 `.UTF-8`이 지역 태그 `tw`에 붙어 번체를 놓치지 않게, 별칭·분할 전에 자른다
+        let v = lowered.split(['.', '@']).next().unwrap_or("");
+        match v {
             "english" => return Some(Lang::En),
             "korean" | "한국어" => return Some(Lang::Ko),
             "japanese" | "日本語" => return Some(Lang::Ja),
@@ -189,6 +192,11 @@ mod tests {
             ("de-DE", Lang::De),
             ("de_AT", Lang::De),
             ("  ko  ", Lang::Ko),
+            // POSIX 로캘의 꼬리(`.인코딩`, `@수식어`)는 무시한다
+            ("ko_KR.UTF-8", Lang::Ko),
+            ("de_DE@euro", Lang::De),
+            ("ja_JP.eucJP", Lang::Ja),
+            ("zh_CN.UTF-8", Lang::ZhCn),
         ] {
             assert_eq!(Lang::parse(value), Some(want), "{value}");
         }
@@ -205,6 +213,9 @@ mod tests {
             "",
             "xx-YY",
             "english-ish",
+            // 로캘의 꼬리가 붙어도 번체는 번체다
+            "zh_TW.UTF-8",
+            "zh_HK.UTF-8",
         ] {
             assert_eq!(Lang::parse(value), None, "{value}");
         }
@@ -214,6 +225,14 @@ mod tests {
     fn codes_parse_back() {
         for l in Lang::ALL {
             assert_eq!(Lang::parse(l.code()), Some(l));
+        }
+    }
+
+    #[test]
+    fn discriminants_round_trip_through_all_and_from_u8() {
+        // `GLOBAL`에는 번호가 저장된다: 번호 ↔ `ALL`의 순서 ↔ `from_u8`이 어긋나면 엉뚱한 언어가 된다
+        for l in Lang::ALL {
+            assert_eq!(Lang::from_u8(l as u8), l, "{l:?}");
         }
     }
 
