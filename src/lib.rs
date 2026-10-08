@@ -8,6 +8,7 @@ pub mod linear;
 pub mod log;
 pub mod markdown;
 pub mod search;
+pub mod side;
 pub mod store;
 pub mod tui;
 pub mod ui;
