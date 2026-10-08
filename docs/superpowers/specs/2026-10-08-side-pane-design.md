@@ -145,9 +145,10 @@ command = ["./target/release/herdr-linear", "ui", "--mode", "side"]
 
 ### 7.2 열고 닫기 (`open side`)
 
-1. **워크스페이스 id**: `HERDR_WORKSPACE_ID`를 쓴다. 없으면 컨텍스트의 `focused_pane_id`로 `herdr pane get`을 불러 `workspace_id`를 읽는다.
+1. **워크스페이스 id**: `HERDR_WORKSPACE_ID`를 쓴다. 없으면 컨텍스트 JSON의 `workspace_id`, 그것도 없으면 컨텍스트의 `focused_pane_id`로 `herdr pane get`을 불러 `result.pane.workspace_id`를 읽는다.
 2. **기록 찾기**: 상태 디렉터리의 `side-panes.json`(`{ "<workspace_id>": "<pane_id>" }`)에서 그 워크스페이스의 pane을 찾는다.
-3. **닫기**: 기록이 있고 `herdr pane get <pane>`이 성공하면 `herdr plugin pane close <pane>`으로 닫고 기록을 지운다.
+3. **닫기**: 기록이 있으면 `herdr pane process-info --pane <pane>`으로 그 pane에서 도는 명령을 본다. 우리 사이드 화면(`…/herdr-linear ui --mode side`)이 돌고 있으면 `herdr plugin pane close <pane>`으로 닫고, 성공하면 기록을 지운다. 그렇지 않으면(이미 닫혔거나 id가 다른 pane에 다시 쓰였으면) 기록만 지우고 4번으로 간다.
+   - pane id가 재사용되거나 기록이 틀려도 남의 pane을 닫지 않으려는 것이다. `plugin pane close`는 플러그인 pane이 아니면 거절한다(확인함).
 4. **열기**: 기록이 없거나 그 pane이 이미 없으면(남은 기록은 지운다) 새로 연다. `herdr plugin pane open --plugin jh.linear --entrypoint side --placement split --direction right --focus`에 팝업과 같은 `--env`(원래 pane의 맥락)를 붙인다.
 5. **실패**: 팝업처럼 로그에 남기고 herdr 알림으로 알린다.
 
@@ -162,14 +163,14 @@ command = ["./target/release/herdr-linear", "ui", "--mode", "side"]
 
 ### 7.4 구현 초기에 확인할 가정
 
-아래는 실제 herdr에서 pane을 열어 봐야 알 수 있다. 사용자의 herdr 화면에 pane이 열리므로 마지막 수동 확인 때 사용자와 함께 확인한다. 그 전까지는 "다를 때" 칸의 대체 경로까지 함께 구현해, 가정이 틀려도 동작하게 한다.
+아래는 실제 herdr에서 pane을 열어 봐야 알 수 있다. 사용자의 herdr 화면에 pane이 열리므로 마지막 수동 확인 때 사용자와 함께 확인한다. 그 전까지는 "다를 때" 칸의 대체 경로까지 함께 구현해, 가정이 틀려도 동작하게 한다(위험한 대체 경로는 예외로 표에 적었다).
 
 | 가정 | 확인 방법 | 다를 때 |
 |---|---|---|
-| 사이드 pane 프로세스가 `HERDR_PANE_ID`·`HERDR_WORKSPACE_ID`를 받는다 | 시작할 때 두 값이 있는지 로그에 남겨 본다 | `herdr pane current`로 조회한다 |
+| 사이드 pane 프로세스가 `HERDR_PANE_ID`·`HERDR_WORKSPACE_ID`를 받는다 | 시작할 때 두 값을 로그에 남겨 본다. 일반 pane은 받는다(확인함: `HERDR_PANE_ID`, `HERDR_WORKSPACE_ID`, `HERDR_TAB_ID`) | `herdr pane current`로 조회한다 |
 | 액션 프로세스가 `HERDR_WORKSPACE_ID`를 받는다 | 같은 방법 | `focused_pane_id`로 `herdr pane get` |
-| 사이드 프로세스가 끝나면 herdr가 그 pane을 닫는다 | `q`로 끝내 본다 | 끝나기 직전에 `herdr pane close <자기 pane>`을 부른다 |
-| 닫힌 pane에는 `herdr pane get`이 실패한다 | 닫은 뒤 불러 본다 | `herdr pane list`에서 찾는다 |
+| 사이드 프로세스가 끝나면 herdr가 그 pane을 닫는다 | `q`로 끝내 본다 | 끝나기 직전에 `herdr plugin pane close <자기 pane>`을 부른다. 이 대체 경로는 미리 넣지 않는다. 자기 pane id를 잘못 알면 다른 pane을 닫을 수 있어서, 수동 확인에서 필요할 때만 넣는다 |
+| 없는 pane에는 `herdr pane get`·`herdr plugin pane close`가 실패한다 | 확인함: 둘 다 종료 코드 1(`pane_not_found`, `plugin_pane_not_found`) | — |
 | `herdr plugin pane close`가 사이드 pane을 닫는다 | 실제로 불러 본다 | `herdr pane close`를 쓴다 |
 | herdr가 마우스 움직임을 pane까지 넘긴다 | 확인함(2026-10-08, 5초에 138개) | — |
 
@@ -181,7 +182,8 @@ command = ["./target/release/herdr-linear", "ui", "--mode", "side"]
 | `src/ui/row.rs` | 목록 줄의 우선순위 막대 칸(4장) |
 | `src/ui/style.rs` | 우선순위 → 막대 칸 스팬(색 있는 줄과 색 없는 글자가 같은 규칙을 쓰게) |
 | `src/cli.rs` | `OpenTarget::Side`, `UiMode::Side`, 실행 분기, 색을 끈 목록 줄(`issue_line`)의 우선순위 칸 |
-| `src/herdr.rs` | `open_pane`에 배치(split·방향) 인자, `pane get`·`pane current`·`plugin pane close` 호출, `open side` 흐름 |
+| `src/herdr.rs` | 사이드 pane 열기(split·오른쪽), `pane get`·`pane current`·`pane process-info`·`plugin pane close` 호출, `open side` 흐름 |
+| `src/context.rs` | 컨텍스트 JSON의 `workspace_id` |
 | `src/side.rs` (새 파일) | `side-panes.json` 읽기·쓰기·지우기(워크스페이스 → pane) |
 | `src/tui/mod.rs` | `side(paths)` 진입점: 준비, 기록, 사이드 모드 앱, 종료 때 기록 지우기 |
 | `src/tui/app.rs` | 사이드 모드 표시, 목록 모드 Esc, `tick`의 자동 새로고침, `r`이 다음 자동 새로고침을 미룸, hover 상태(`Input::Hover`), 누를 수 있는 대상 `Target`(view에서 옮겨 와 view·keys가 다시 내보냄) |
@@ -200,7 +202,7 @@ command = ["./target/release/herdr-linear", "ui", "--mode", "side"]
 | `ui::row`·`ui::style` | 우선순위 다섯 단계의 막대 칸 글자와 색(긴급 빨강 굵게, 흐린 막대), 좁은 폭에서 라벨·담당자를 먼저 빼고 막대 칸은 남김, 바뀐 기존 줄 기대값 |
 | `cli` (목록) | 색을 끈 목록 줄의 우선순위 칸 글자 |
 | `side` | 기록·읽기·지우기, 다른 워크스페이스 기록 유지, 깨진 파일은 빈 기록, 자기 기록만 지우기 |
-| `herdr` | 가짜 herdr 스크립트로 확인한다.<br>• 기록 없음 → `plugin pane open` 인자(`--placement split --direction right --focus`, `--env`)<br>• 살아 있는 기록 → `plugin pane close` 후 기록 삭제<br>• 죽은 기록 → 기록 삭제 후 열기<br>• 워크스페이스 id를 `pane get`으로 얻기 |
+| `herdr` | 가짜 herdr 스크립트로 확인한다.<br>• 기록 없음 → `plugin pane open` 인자(`--placement split --direction right --focus`, `--env`)<br>• 우리 사이드 화면이 도는 기록 → `plugin pane close` 후 기록 삭제<br>• 닫혔거나 다른 명령이 도는 기록 → 기록 삭제 후 열기(그 pane은 닫지 않음)<br>• 워크스페이스 id를 `pane get`으로 얻기 |
 | `cli` | `open side`, `ui --mode side` 해석 (지금의 "`open side`는 오류" 테스트를 바꾼다) |
 | `tui::runtime` | 다시 그릴지 판단: 바뀐 게 있으면 그리고, 없으면 1초가 지난 뒤에만 그린다 |
 | `tui::keys` | 대상 위 움직임 → `Hover(Some)`, 빈 곳 → `Hover(None)` |
