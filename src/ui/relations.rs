@@ -482,6 +482,17 @@ mod tests {
     }
 
     #[test]
+    fn more_children_line_fits_in_every_language() {
+        // 60칸 pane의 상세 글자 영역은 58칸이다. 그 줄은 칸 이름 폭만큼의 공백 + 안내라서 다 보여야 한다
+        for lang in Lang::ALL {
+            with_lang(lang, || {
+                let columns = kind_width() + t().more_children.width();
+                assert!(columns <= 58, "{lang:?}: {columns} columns");
+            });
+        }
+    }
+
+    #[test]
     fn english_relations_use_english_labels_and_summary() {
         let (out, _) = with_lang(Lang::En, || lines(Some(&parent()), Some(&sample()), 80));
         let got = text(&out);

@@ -313,4 +313,23 @@ mod tests {
         assert_ne!((ja.minutes_ago)(5), (en.minutes_ago)(5));
         assert!(!include_str!("ja.rs").contains("..EN"));
     }
+
+    #[test]
+    fn simplified_chinese_catalog_is_translated() {
+        let (zh, en) = (texts_for(Lang::ZhCn), texts_for(Lang::En));
+        for (a, b) in [
+            (zh.cli_about, en.cli_about),
+            (zh.no_api_key, en.no_api_key),
+            (zh.tab_mine, en.tab_mine),
+            (zh.menu_close, en.menu_close),
+            (zh.rel_blocked_by, en.rel_blocked_by),
+            (zh.hints_list, en.hints_list),
+            (zh.deep_limit, en.deep_limit),
+            (zh.herdr_busy, en.herdr_busy),
+        ] {
+            assert_ne!(a, b);
+        }
+        assert_ne!((zh.minutes_ago)(5), (en.minutes_ago)(5));
+        assert!(!include_str!("zh_cn.rs").contains("..EN"));
+    }
 }
