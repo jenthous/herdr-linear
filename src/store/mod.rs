@@ -9,6 +9,7 @@ use anyhow::{Context, Result};
 use rusqlite::{Connection, Transaction, TransactionBehavior};
 
 use crate::config::ensure_private_dir;
+use crate::i18n::t;
 
 /// 스키마 버전. 1(관계 테이블 없음)이면 테이블만 더하고, 그 밖의 다른 값이면 캐시를 비우고 새로 만든다.
 pub const SCHEMA_VERSION: i64 = 2;
@@ -82,9 +83,9 @@ impl Store {
             Ok(store) => Ok(store),
             Err(e) if is_corrupt(&e) => {
                 remove_db_files(path);
-                Store::open_once(path).context("캐시 DB를 다시 만들지 못했어요")
+                Store::open_once(path).context(t().cache_recreate_failed)
             }
-            Err(e) => Err(e.context("캐시 DB를 열지 못했어요")),
+            Err(e) => Err(e.context(t().cache_open_failed)),
         }
     }
 

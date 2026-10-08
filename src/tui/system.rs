@@ -5,6 +5,8 @@ use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result};
 
+use crate::i18n::t;
+
 pub trait System {
     fn open_url(&self, url: &str) -> Result<()>;
     fn copy(&self, text: &str) -> Result<()>;
@@ -26,7 +28,7 @@ impl System for RealSystem {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
-            .with_context(|| format!("{opener}을 실행하지 못했어요"))?;
+            .with_context(|| (t().run_failed)(opener))?;
         // 기다리지 않되, 끝나면 거둬서 좀비 프로세스를 남기지 않는다
         std::thread::spawn(move || {
             let _ = child.wait();

@@ -7,6 +7,8 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
+use crate::i18n::t;
+
 pub const LINEAR_ENDPOINT: &str = "https://api.linear.app/graphql";
 
 /// 남은 요청이 이보다 적으면 자동 요청(주기 새로고침·서버 검색)을 멈춘다.
@@ -19,15 +21,15 @@ pub const GLOBAL_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ApiError {
-    #[error("Linear API 한도를 넘었어요")]
+    #[error("{}", t().api_rate_limited)]
     RateLimited { reset_at_ms: Option<i64> },
-    #[error("API 키가 만료됐거나 권한이 없어요")]
+    #[error("{}", t().api_auth)]
     Auth,
-    #[error("Linear가 요청을 처리하지 못했어요: {0}")]
+    #[error("{}", (t().api_graphql)(.0))]
     GraphQl(String),
-    #[error("오프라인: {0}")]
+    #[error("{}", (t().api_offline)(.0))]
     Offline(String),
-    #[error("응답을 해석하지 못했어요: {0}")]
+    #[error("{}", (t().api_decode)(.0))]
     Decode(String),
 }
 
@@ -176,7 +178,7 @@ fn parse_response<T: DeserializeOwned>(
                 429 => ApiError::RateLimited {
                     reset_at_ms: reset_ms,
                 },
-                s if s >= 500 => ApiError::Offline(format!("Linear 서버 오류 ({s})")),
+                s if s >= 500 => ApiError::Offline((t().server_error)(s)),
                 _ => ApiError::Decode(e.to_string()),
             });
         }
@@ -198,20 +200,21 @@ fn parse_response<T: DeserializeOwned>(
         return Err(ApiError::GraphQl(resp.errors[0].message.clone()));
     }
     if status >= 500 {
-        return Err(ApiError::Offline(format!("Linear 서버 오류 ({status})")));
+        return Err(ApiError::Offline((t().server_error)(status)));
     }
     if status == 401 || status == 403 {
         return Err(ApiError::Auth);
     }
     let data = resp
         .data
-        .ok_or_else(|| ApiError::Decode("data가 없어요".to_string()))?;
+        .ok_or_else(|| ApiError::Decode(t().no_data.to_string()))?;
     serde_json::from_value(data).map_err(|e| ApiError::Decode(e.to_string()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::i18n::{Lang, with_lang};
     use mockito::Matcher;
 
     #[derive(Debug, Deserialize, PartialEq)]
@@ -403,5 +406,31 @@ mod tests {
         assert_eq!(a.key_fingerprint(), a2.key_fingerprint());
         assert_ne!(a.key_fingerprint(), b.key_fingerprint());
         assert!(!a.key_fingerprint().contains("aaaa"));
+    }
+
+    #[test]
+    fn api_errors_follow_the_language() {
+        assert_eq!(
+            ApiError::Auth.to_string(),
+            "API 키가 만료됐거나 권한이 없어요"
+        );
+        with_lang(Lang::En, || {
+            assert_eq!(
+                ApiError::Auth.to_string(),
+                "The API key has expired or lacks access"
+            );
+            assert_eq!(
+                ApiError::Offline("timeout".into()).to_string(),
+                "Offline: timeout"
+            );
+            assert_eq!(
+                ApiError::RateLimited { reset_at_ms: None }.to_string(),
+                "Linear API rate limit reached"
+            );
+            assert_eq!(
+                parse_response::<serde_json::Value>(503, "oops", None).unwrap_err(),
+                ApiError::Offline("Linear server error (503)".into())
+            );
+        });
     }
 }

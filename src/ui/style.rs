@@ -4,6 +4,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
+use crate::i18n::t;
 use crate::linear::types::{LabelRef, StateRef};
 
 /// 흐린 글자 (식별자, 담당자, 보조 정보)
@@ -60,12 +61,13 @@ pub fn label_style(label: &LabelRef) -> Style {
 
 /// 우선순위 이름.
 pub fn priority_label(p: i64) -> &'static str {
+    let t = t();
     match p {
-        1 => "긴급",
-        2 => "높음",
-        3 => "보통",
-        4 => "낮음",
-        _ => "없음",
+        1 => t.priority_urgent,
+        2 => t.priority_high,
+        3 => t.priority_medium,
+        4 => t.priority_low,
+        _ => t.priority_none,
     }
 }
 
@@ -98,14 +100,15 @@ pub fn priority_text(p: i64) -> String {
     priority_mark(p).to_string()
 }
 
-/// "방금", "5분 전", "3시간 전", "2일 전".
+/// "방금", "5분 전", "3시간 전", "2일 전" (지금 언어로).
 pub fn ago(now_ms: i64, then_ms: i64) -> String {
+    let t = t();
     let mins = (now_ms - then_ms).max(0) / 60_000;
     match mins {
-        0 => "방금".to_string(),
-        m if m < 60 => format!("{m}분 전"),
-        m if m < 60 * 24 => format!("{}시간 전", m / 60),
-        m => format!("{}일 전", m / (60 * 24)),
+        0 => t.just_now.to_string(),
+        m if m < 60 => (t.minutes_ago)(m),
+        m if m < 60 * 24 => (t.hours_ago)(m / 60),
+        m => (t.days_ago)(m / (60 * 24)),
     }
 }
 
@@ -146,6 +149,7 @@ pub fn truncate(s: &str, width: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::i18n::{Lang, with_lang};
     use crate::test_support::IssueBuilder;
 
     #[test]
@@ -215,5 +219,20 @@ mod tests {
             assert_eq!(priority_span(p).width(), 2, "{p}");
             assert_eq!(priority_text(p).width(), 2, "{p}");
         }
+    }
+
+    #[test]
+    fn ago_and_priority_follow_the_language() {
+        let now = 10 * 24 * 60 * 60_000;
+        assert_eq!(ago(now, now), "방금");
+        assert_eq!(priority_label(1), "긴급");
+        with_lang(Lang::En, || {
+            assert_eq!(ago(now, now - 30_000), "just now");
+            assert_eq!(ago(now, now - 5 * 60_000), "5m ago");
+            assert_eq!(ago(now, now - 3 * 60 * 60_000), "3h ago");
+            assert_eq!(ago(now, now - 2 * 24 * 60 * 60_000), "2d ago");
+            assert_eq!(priority_label(1), "Urgent");
+            assert_eq!(priority_label(0), "None");
+        });
     }
 }

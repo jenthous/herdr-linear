@@ -35,4 +35,44 @@ pub const EN: Texts = Texts {
     empty_key: "Can't save an empty key",
     delete_failed: |p| format!("Couldn't delete {p}"),
     mkdir_failed: |p| format!("Couldn't create the directory {p}"),
+    priority_urgent: "Urgent",
+    priority_high: "High",
+    priority_medium: "Medium",
+    priority_low: "Low",
+    priority_none: "None",
+    just_now: "just now",
+    minutes_ago: |m| format!("{m}m ago"),
+    hours_ago: |h| format!("{h}h ago"),
+    days_ago: |d| format!("{d}d ago"),
+    rel_parent: "Parent",
+    rel_blocked_by: "Blocked by",
+    rel_blocking: "Blocking",
+    rel_related: "Related",
+    rel_child: "Sub-issues",
+    children_over: |total| format!("over {total}"),
+    children_all_done: |total| {
+        if total == 1 {
+            "1 done".to_string()
+        } else {
+            format!("all {total} done")
+        }
+    },
+    children_left: |total, left| {
+        vec![
+            (false, format!("{left} open")),
+            (true, format!(" · {total} total")),
+        ]
+    },
+    more_children: "… more (o to view in the browser)",
+    image_placeholder: |index, label| format!("[image {index}: {label}]"),
+    api_rate_limited: "Linear API rate limit reached",
+    api_auth: "The API key has expired or lacks access",
+    api_graphql: |m| format!("Linear couldn't process the request: {m}"),
+    api_offline: |m| format!("Offline: {m}"),
+    api_decode: |m| format!("Couldn't read the response: {m}"),
+    server_error: |s| format!("Linear server error ({s})"),
+    no_data: "No data in the response",
+    cache_recreate_failed: "Couldn't recreate the cache DB",
+    cache_open_failed: "Couldn't open the cache DB",
+    run_failed: |p| format!("Couldn't run {p}"),
 };

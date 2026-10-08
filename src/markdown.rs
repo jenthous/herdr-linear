@@ -9,6 +9,8 @@ use regex::Regex;
 use unicode_normalization::UnicodeNormalization;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
+use crate::i18n::t;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LinkKind {
     Link,
@@ -488,7 +490,7 @@ impl Renderer {
             url,
             label: label.clone(),
         });
-        format!("[이미지 {index}: {label}]")
+        (t().image_placeholder)(index, &label)
     }
 
     /// 표 안의 이벤트. 셀 텍스트를 모으고, 링크·이미지에도 번호를 매긴다. 표를 다 그렸으면 true.
@@ -803,6 +805,7 @@ fn wrap(segs: &[Seg], first: &[Seg], rest: &[Seg], width: usize, code: bool) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::i18n::{Lang, with_lang};
 
     fn plain(md: &str, width: u16) -> Vec<String> {
         let r = render(md, width, &Theme::default());
@@ -1173,5 +1176,19 @@ mod tests {
             "{out:?}"
         );
         assert!(out.contains("a]52;c;eA==b"), "{out:?}");
+    }
+
+    #[test]
+    fn image_placeholder_follows_the_language() {
+        let r = with_lang(Lang::En, || {
+            render_numbered(
+                "![diagram](https://x.dev/a.png)",
+                80,
+                &Theme::default(),
+                &[],
+                1,
+            )
+        });
+        assert!(to_plain(&r.lines).contains("[image 1: diagram]"));
     }
 }

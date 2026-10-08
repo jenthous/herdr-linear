@@ -5,11 +5,9 @@ use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
 use super::style::{DIM, state_icon, state_style, truncate};
+use crate::i18n::t;
 use crate::linear::types::{IssueRelations, ParentRef, RelatedIssue, StateRef};
 use crate::markdown::sanitize;
-
-/// 칸 이름 폭. 가장 긴 `막는 중`이 7칸이다.
-const KIND_WIDTH: usize = 8;
 
 /// 관계 종류. 화면에는 이 순서로 나온다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,15 +20,34 @@ pub enum RelKind {
 }
 
 impl RelKind {
+    pub const ALL: [RelKind; 5] = [
+        RelKind::Parent,
+        RelKind::BlockedBy,
+        RelKind::Blocking,
+        RelKind::Related,
+        RelKind::Child,
+    ];
+
     pub fn label(self) -> &'static str {
+        let t = t();
         match self {
-            RelKind::Parent => "상위",
-            RelKind::BlockedBy => "막힘",
-            RelKind::Blocking => "막는 중",
-            RelKind::Related => "관련",
-            RelKind::Child => "하위",
+            RelKind::Parent => t.rel_parent,
+            RelKind::BlockedBy => t.rel_blocked_by,
+            RelKind::Blocking => t.rel_blocking,
+            RelKind::Related => t.rel_related,
+            RelKind::Child => t.rel_child,
         }
     }
+}
+
+/// 칸 이름 폭: 지금 언어의 칸 이름 중 가장 넓은 것 + 1칸. 한국어는 `막는 중`(7칸)이라 8칸이다.
+pub fn kind_width() -> usize {
+    RelKind::ALL
+        .iter()
+        .map(|k| k.label().width())
+        .max()
+        .unwrap_or(0)
+        + 1
 }
 
 /// 관계 한 줄.
@@ -115,20 +132,21 @@ fn pad(s: &str, width: usize) -> String {
     format!("{s}{}", " ".repeat(width.saturating_sub(s.width())))
 }
 
-/// 관계 한 줄: 칸 이름(8칸) · 상태 아이콘 · 식별자 · 제목.
+/// 관계 한 줄: 칸 이름(`kind_width`칸) · 상태 아이콘 · 식별자 · 제목.
 /// `show_kind`가 false면 칸 이름 자리를 비운다. 제목은 `width`에 맞춰 자르고, 자리가 없으면 뺀다.
 pub fn row_line(row: &RelRow, show_kind: bool, width: u16) -> Line<'static> {
+    let kind_width = kind_width();
     let kind = if show_kind {
-        pad(row.kind.label(), KIND_WIDTH)
+        pad(row.kind.label(), kind_width)
     } else {
-        " ".repeat(KIND_WIDTH)
+        " ".repeat(kind_width)
     };
     let icon = match &row.state {
         Some(s) => Span::styled(format!("{} ", state_icon(&s.state_type)), state_style(s)),
         None => Span::raw("  "),
     };
     let id = Span::styled(format!("{:<9} ", sanitize(&row.identifier)), DIM);
-    let used = KIND_WIDTH + icon.width() + id.width();
+    let used = kind_width + icon.width() + id.width();
     let title = truncate(
         &sanitize(&row.title),
         usize::from(width).saturating_sub(used),
@@ -142,22 +160,29 @@ pub fn row_line(row: &RelRow, show_kind: bool, width: u16) -> Line<'static> {
     ])
 }
 
-/// `하위    4개 중 2개 남음` / `하위    4개 모두 끝남` / `하위    50개 넘음`.
+/// `하위    4개 중 2개 남음` / `하위    4개 모두 끝남` / `하위    50개 넘음` (지금 언어로).
 fn children_summary(rows: &[RelRow], relations: Option<&IssueRelations>) -> Line<'static> {
+    let t = t();
     let kids: Vec<&RelRow> = rows.iter().filter(|r| r.kind == RelKind::Child).collect();
     let total = kids.len();
     let left = kids.iter().filter(|r| !r.finished()).count();
-    let mut spans = vec![Span::styled(pad(RelKind::Child.label(), KIND_WIDTH), DIM)];
+    let mut spans = vec![Span::styled(pad(RelKind::Child.label(), kind_width()), DIM)];
     if relations.is_some_and(|r| r.more_children) {
-        spans.push(Span::styled(format!("{total}개 넘음"), DIM));
+        spans.push(Span::styled((t.children_over)(total), DIM));
     } else if left == 0 {
         spans.push(Span::styled(
-            format!("{total}개 모두 끝남"),
+            (t.children_all_done)(total),
             Style::new().fg(Color::Green),
         ));
     } else {
-        spans.push(Span::styled(format!("{total}개 중 "), DIM));
-        spans.push(Span::raw(format!("{left}개 남음")));
+        // 어순이 언어마다 달라서 (흐리게 그릴지, 글자) 조각을 카탈로그가 정한다
+        for (dim, text) in (t.children_left)(total, left) {
+            spans.push(if dim {
+                Span::styled(text, DIM)
+            } else {
+                Span::raw(text)
+            });
+        }
     }
     Line::from(spans)
 }
@@ -188,10 +213,7 @@ pub fn lines(
     }
     if relations.is_some_and(|r| r.more_children) {
         out.push(Line::from(Span::styled(
-            format!(
-                "{}… 더 있어요 (o로 브라우저에서 보기)",
-                " ".repeat(KIND_WIDTH)
-            ),
+            format!("{}{}", " ".repeat(kind_width()), t().more_children),
             DIM,
         )));
         map.push(None);
@@ -202,6 +224,7 @@ pub fn lines(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::i18n::{Lang, with_lang};
     use crate::markdown::to_plain;
     use crate::test_support::IssueBuilder;
 
@@ -420,6 +443,42 @@ mod tests {
         assert_eq!(
             rows(None, Some(&sample()))[0].filter_text(),
             "막힘 ENG-140 API 스키마 확정"
+        );
+    }
+
+    #[test]
+    fn kind_width_fits_every_language() {
+        assert_eq!(kind_width(), 8);
+        assert_eq!(with_lang(Lang::En, kind_width), "Blocked by".width() + 1);
+        for lang in Lang::ALL {
+            with_lang(lang, || {
+                let w = kind_width();
+                for k in RelKind::ALL {
+                    assert!(k.label().width() < w, "{lang:?} {k:?}");
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn english_relations_use_english_labels_and_summary() {
+        let (out, _) = with_lang(Lang::En, || lines(Some(&parent()), Some(&sample()), 80));
+        let got = text(&out);
+        // "Blocked by"(10칸)가 가장 넓어서 칸 이름은 11칸이다
+        assert!(got[0].starts_with("Parent     "), "{got:?}");
+        assert!(got.iter().any(|l| l.starts_with("Blocked by ")), "{got:?}");
+        assert!(
+            got.iter().any(|l| l == "Sub-issues 2 open · 4 total"),
+            "{got:?}"
+        );
+        let mut more = sample();
+        more.more_children = true;
+        let (out, _) = with_lang(Lang::En, || lines(None, Some(&more), 80));
+        let got = text(&out);
+        assert!(got.iter().any(|l| l == "Sub-issues over 4"), "{got:?}");
+        assert_eq!(
+            got.last().unwrap(),
+            &format!("{}… more (o to view in the browser)", " ".repeat(11))
         );
     }
 }
