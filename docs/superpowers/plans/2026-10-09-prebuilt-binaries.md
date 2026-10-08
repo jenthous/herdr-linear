@@ -293,6 +293,28 @@ fn archive_without_the_binary_falls_back_to_cargo() {
 }
 
 #[test]
+fn runs_like_herdr_from_the_plugin_root_even_with_cdpath() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = plugin_root(dir.path(), "9.9.9");
+    let releases = release(dir.path(), "9.9.9", "herdr-linear", None);
+    // herdr는 플러그인 루트에서 `bash scripts/install.sh`로 돌린다. CDPATH가 있어도 루트를 찾는다
+    let out = Command::new("/bin/bash")
+        .arg("scripts/install.sh")
+        .current_dir(&root)
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("HOME", dir.path())
+        .env("CDPATH", ".")
+        .env("HERDR_LINEAR_RELEASES", format!("file://{}", releases.display()))
+        .env("HERDR_LINEAR_TARGET", TARGET)
+        .env("HERDR_LINEAR_RETRY_SECONDS", "0")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(installed(&root), "fake-release");
+}
+
+#[test]
 fn failed_install_keeps_the_existing_binary() {
     let dir = tempfile::tempdir().unwrap();
     let root = plugin_root(dir.path(), "9.9.9");
@@ -315,7 +337,7 @@ fn failed_install_keeps_the_existing_binary() {
 - [ ] **Step 2: 실패를 확인한다**
 
 Run: `cargo test --test install_script`
-Expected: 6개 모두 실패한다. `scripts/install.sh`가 없어서 `fs::copy`가 패닉한다.
+Expected: 7개 모두 실패한다. `scripts/install.sh`가 없어서 `fs::copy`가 패닉한다.
 
 - [ ] **Step 3: 구현한다**
 
@@ -331,7 +353,7 @@ set -euo pipefail
 
 name="herdr-linear"
 # herdr가 빌드 명령에 주는 작업 폴더·환경에 기대지 않고 스크립트 위치에서 플러그인 루트를 구한다
-root="$(cd "$(dirname "$0")/.." && pwd)"
+root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 dest="$root/target/release/$name"
 releases="${HERDR_LINEAR_RELEASES:-https://github.com/jenthous/herdr-linear/releases/download}"
 retry_seconds="${HERDR_LINEAR_RETRY_SECONDS:-3}"
@@ -453,10 +475,10 @@ command = ["bash", "scripts/install.sh"]
 - [ ] **Step 4: 통과를 확인한다**
 
 Run: `cargo test --test install_script`
-Expected: 6개 통과. 출력에 경고가 없다.
+Expected: 7개 통과. 출력에 경고가 없다.
 
 Run: `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test`
-Expected: 모두 통과(라이브러리 341개 + 1개 무시, `install_script` 6개).
+Expected: 모두 통과(라이브러리 341개 + 1개 무시, `install_script` 7개).
 
 Run: `bash -n scripts/install.sh && /bin/bash --version | head -1`
 Expected: 문법 오류 없음. 이 기기의 `/bin/bash`는 3.2다(테스트도 이 bash로 돌았다).
@@ -538,7 +560,7 @@ Expected: 2개 실패(스크립트가 없어서 bash가 종료 코드 127을 낸
 set -euo pipefail
 
 tag="${1:?usage: check-release-version.sh vX.Y.Z}"
-root="$(cd "$(dirname "$0")/.." && pwd)"
+root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 
 first_version() {
   awk -F'"' '/^version *=/ {print $2; exit}' "$1"
