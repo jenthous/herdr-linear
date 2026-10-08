@@ -11,29 +11,29 @@ command = ["bash", "scripts/install.sh"]
 
 [[actions]]
 id = "palette"
-title = "Linear: 검색 팔레트"
-description = "Linear 이슈 검색 팔레트를 연다 (이슈 식별자를 선택해 두면 그 이슈를 바로 연다)"
+title = "Linear: Search palette"
+description = "Open the Linear issue search palette (opens the issue directly when an issue ID is selected)"
 contexts = ["global", "workspace", "pane", "selection"]
 command = ["./target/release/herdr-linear", "open", "palette"]
 
 [[actions]]
 id = "side"
-title = "Linear: 사이드 pane 열기/닫기"
-description = "오른쪽에 Linear pane을 열거나 닫는다"
+title = "Linear: Toggle side pane"
+description = "Open or close a Linear pane on the right"
 contexts = ["global", "workspace", "pane"]
 command = ["./target/release/herdr-linear", "open", "side"]
 
 [[actions]]
 id = "open-url"
-title = "Linear: 링크로 이슈 열기"
-description = "Ctrl+클릭한 linear.app 이슈 링크를 팔레트에서 연다"
+title = "Linear: Open issue from link"
+description = "Open a Ctrl+clicked linear.app issue link in the palette"
 contexts = ["global", "workspace", "pane"]
 command = ["./target/release/herdr-linear", "open", "url"]
 
 [[actions]]
 id = "logout"
-title = "Linear: 로그아웃"
-description = "저장된 API 키와 캐시를 지운다"
+title = "Linear: Log out"
+description = "Delete the saved API key and cache"
 contexts = ["global"]
 command = ["./target/release/herdr-linear", "logout"]
 
@@ -53,6 +53,6 @@ command = ["./target/release/herdr-linear", "ui", "--mode", "side"]
 
 [[link_handlers]]
 id = "linear-issue"
-title = "Linear 이슈 열기"
+title = "Open Linear issue"
 pattern = "^https://linear\\.app/[^/]+/issue/[A-Za-z0-9]+-[0-9]+"
 action = "open-url"

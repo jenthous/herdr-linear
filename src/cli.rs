@@ -259,12 +259,10 @@ pub fn run(cli: Cli) -> Result<String> {
 }
 
 pub fn login(paths: &Paths) -> Result<String> {
-    let key = rpassword::prompt_password(
-        "Linear API 키 (Linear → Settings → Security & access → Personal API keys): ",
-    )?;
+    let key = rpassword::prompt_password(t().login_prompt)?;
     let mut out = login_with_key(paths, &key, LinearClient::new)?;
     if std::env::var("LINEAR_API_KEY").is_ok_and(|v| !v.trim().is_empty()) {
-        out.push_str("\n참고: LINEAR_API_KEY 환경 변수가 설정돼 있어서 그 값이 우선 쓰여요");
+        out.push_str(t().login_env_note);
     }
     Ok(out)
 }
@@ -277,27 +275,27 @@ pub fn login_with_key(
 ) -> Result<String> {
     let key = key.trim();
     if key.is_empty() {
-        bail!("키가 비어 있어요");
+        bail!("{}", t().key_empty);
     }
     let client = make_client(key.to_string());
     let viewer = match queries::viewer(&client) {
         Ok(v) => v,
-        Err(ApiError::Auth) => bail!("키가 유효하지 않아요. Linear에서 키를 다시 확인하세요"),
+        Err(ApiError::Auth) => bail!("{}", t().key_invalid),
         Err(e) => return Err(e.into()),
     };
     config::save_api_key(paths, key)?;
     let store = open_cache(paths)?;
     save_viewer(&store, &viewer, now_ms(), &client.key_fingerprint())?;
-    Ok(markdown::sanitize(&format!(
-        "{}님, {} 워크스페이스에 연결됐어요",
-        viewer.name, viewer.organization.name
+    Ok(markdown::sanitize(&(t().connected)(
+        &viewer.name,
+        &viewer.organization.name,
     )))
 }
 
 /// 캐시를 연다. 열 수 없으면 경고하고, 이번 실행은 저장 없이 메모리 캐시로 계속한다.
 fn open_cache(paths: &Paths) -> Result<Store> {
     Store::open(&paths.cache_db()).or_else(|e| {
-        eprintln!("경고: 캐시를 열지 못해 이번에는 저장 없이 실행해요 ({e:#})");
+        eprintln!("{}", (t().cache_open_warning)(&format!("{e:#}")));
         Store::open_in_memory()
     })
 }
@@ -318,7 +316,7 @@ pub fn logout(paths: &Paths, credentials: &[PathBuf], caches: &[PathBuf]) -> Res
     for db in caches {
         remove_db_files(db);
     }
-    Ok("API 키와 캐시를 지웠어요".to_string())
+    Ok(t().logged_out.to_string())
 }
 
 /// viewer를 저장한다. 워크스페이스가 바뀌었으면 캐시를 먼저 비운다.
@@ -398,8 +396,7 @@ pub fn scope_team_ids(viewer: &Viewer, settings: &Settings) -> Vec<String> {
 }
 
 pub fn whoami(ctx: &Ctx) -> Result<String> {
-    let v = load_viewer(ctx, true)?
-        .ok_or_else(|| anyhow!("오프라인이라 계정 정보를 가져올 수 없어요"))?;
+    let v = load_viewer(ctx, true)?.ok_or_else(|| anyhow!("{}", t().whoami_offline))?;
     let teams: Vec<String> = v
         .teams
         .nodes
@@ -408,22 +405,16 @@ pub fn whoami(ctx: &Ctx) -> Result<String> {
         .collect();
     let mut out = vec![
         format!("{} ({}) <{}>", v.name, v.display_name, v.email),
-        format!(
-            "워크스페이스: {} ({})",
-            v.organization.name, v.organization.url_key
-        ),
-        format!("팀: {}", teams.join(", ")),
-        format!(
-            "검색 범위: 팀 {}개",
-            scope_team_ids(&v, &ctx.settings).len()
-        ),
+        (t().whoami_workspace)(&v.organization.name, &v.organization.url_key),
+        (t().whoami_teams)(&teams.join(", ")),
+        (t().whoami_scope)(scope_team_ids(&v, &ctx.settings).len()),
     ];
     if let Some(w) = scope_warning(&v, &ctx.settings) {
         out.push(w);
     }
     let rate = ctx.client.rate_limit();
     if let Some(r) = rate.requests_remaining {
-        out.push(format!("남은 요청: {r} (시간당)"));
+        out.push((t().whoami_remaining)(r));
     }
     // 이름·팀 이름은 워크스페이스 구성원이 정할 수 있는 값이라 제어 문자를 지운다
     Ok(markdown::sanitize(&out.join("\n")))
@@ -431,12 +422,8 @@ pub fn whoami(ctx: &Ctx) -> Result<String> {
 
 /// config의 `teams`가 내 팀과 하나도 맞지 않으면 경고 문구. 이때 범위 제한 없이 모든 팀에서 찾는다.
 pub fn scope_warning(viewer: &Viewer, settings: &Settings) -> Option<String> {
-    (!settings.teams.is_empty() && scope_team_ids(viewer, settings).is_empty()).then(|| {
-        format!(
-            "경고: config의 teams({})와 맞는 팀이 없어서 모든 팀에서 찾아요",
-            settings.teams.join(", ")
-        )
-    })
+    (!settings.teams.is_empty() && scope_team_ids(viewer, settings).is_empty())
+        .then(|| (t().scope_warning)(&settings.teams.join(", ")))
 }
 
 pub fn mine(ctx: &Ctx) -> Result<String> {
@@ -453,18 +440,15 @@ pub fn mine(ctx: &Ctx) -> Result<String> {
         }
         Err(ApiError::Offline(msg)) => {
             if !cache_is_ours(ctx)? {
-                bail!("오프라인이고 이 키로 저장된 결과가 없어요: {msg}");
+                bail!("{}", (t().offline_no_results_for_key)(&msg));
             }
             match ctx.store.get_view("mine")? {
                 Some((issues, at)) => Ok(format_list(
                     ctx,
                     &issues,
-                    Some(&format!(
-                        "오프라인: {} 저장된 결과 · {msg}",
-                        ago(ctx.now_ms, at)
-                    )),
+                    Some(&(t().offline_saved_results)(&ago(ctx.now_ms, at), &msg)),
                 )),
-                None => Err(anyhow!("오프라인이고 저장된 결과도 없어요: {msg}")),
+                None => Err(anyhow!("{}", (t().offline_no_results)(&msg))),
             }
         }
         Err(e) => Err(api_error(ctx, e)),
@@ -474,7 +458,7 @@ pub fn mine(ctx: &Ctx) -> Result<String> {
 pub fn search(ctx: &Ctx, input: &str, deep: bool) -> Result<String> {
     let q = parse(input);
     if deep && q.text().is_empty() {
-        bail!("깊은 검색에는 검색어가 필요해요");
+        bail!("{}", t().deep_needs_query);
     }
     let viewer = load_viewer(ctx, false)?;
     let viewer_id = viewer.as_ref().map(|v| v.id.as_str());
@@ -507,12 +491,12 @@ pub fn search(ctx: &Ctx, input: &str, deep: bool) -> Result<String> {
         }
         Err(ApiError::Offline(msg)) => {
             if !cache_is_ours(ctx)? {
-                bail!("오프라인이고 이 키로 저장된 이슈가 없어요: {msg}");
+                bail!("{}", (t().offline_no_issues_for_key)(&msg));
             }
             Ok(format_list(
                 ctx,
                 &local[..local.len().min(SEARCH_LIMIT)],
-                Some(&format!("오프라인: 저장된 이슈에서만 찾았어요 · {msg}")),
+                Some(&(t().offline_local_only)(&msg)),
             ))
         }
         Err(e) => Err(api_error(ctx, e)),
@@ -529,10 +513,7 @@ pub fn show(ctx: &Ctx, id: &str) -> Result<String> {
                 .store
                 .upsert_issues(std::slice::from_ref(&d.issue), ctx.now_ms)?;
             if !removed.is_empty() {
-                return Ok(format!(
-                    "{}은(는) 보관되었거나 삭제된 이슈예요",
-                    d.issue.identifier
-                ));
+                return Ok((t().issue_gone)(&d.issue.identifier));
             }
             ctx.store
                 .set_comments(&d.issue.id, &d.comments, ctx.now_ms)?;
@@ -559,16 +540,16 @@ pub fn show(ctx: &Ctx, id: &str) -> Result<String> {
             if let Some(cached) = ctx.store.get_issue(id)? {
                 ctx.store.remove_issue(&cached.id)?;
             }
-            bail!("{id} 이슈를 찾을 수 없어요 (보관·삭제됐거나 권한이 없을 수 있어요)")
+            bail!("{}", (t().issue_not_found)(id))
         }
         Err(ApiError::Offline(msg)) => {
             if !cache_is_ours(ctx)? {
-                bail!("오프라인이고 이 키로 저장된 {id}도 없어요: {msg}");
+                bail!("{}", (t().offline_issue_not_saved_for_key)(id, &msg));
             }
             let issue = ctx
                 .store
                 .get_issue(id)?
-                .ok_or_else(|| anyhow!("오프라인이고 저장된 {id}도 없어요: {msg}"))?;
+                .ok_or_else(|| anyhow!("{}", (t().offline_issue_not_saved)(id, &msg)))?;
             let comments = ctx
                 .store
                 .get_comments(&issue.id)?
@@ -581,7 +562,7 @@ pub fn show(ctx: &Ctx, id: &str) -> Result<String> {
                 &comments,
                 false,
                 relations.as_ref(),
-                Some(&format!("오프라인: 저장된 내용 · {msg}")),
+                Some(&(t().offline_saved_detail)(&msg)),
                 &keys,
             ))
         }
@@ -597,10 +578,10 @@ fn api_error(ctx: &Ctx, e: ApiError) -> anyhow::Error {
             reset_at_ms: Some(reset),
         } => {
             let mins = ((reset - ctx.now_ms).max(0) + 59_999) / 60_000;
-            anyhow!("Linear API 한도를 넘었어요. {mins}분 후 다시 시도하세요")
+            anyhow!("{}", (t().rate_limited_retry_in)(mins))
         }
         ApiError::Auth if ctx.key_source == KeySource::Env => {
-            anyhow!("LINEAR_API_KEY 환경 변수의 키가 유효하지 않아요")
+            anyhow!("{}", t().env_key_invalid)
         }
         other => other.into(),
     }
@@ -631,7 +612,7 @@ fn format_list(ctx: &Ctx, issues: &[Issue], banner: Option<&str>) -> String {
         out.push(format!("({b})"));
     }
     if issues.is_empty() {
-        out.push("결과가 없어요".to_string());
+        out.push(t().no_results.to_string());
     }
     for issue in issues {
         out.push(if ctx.color {
@@ -672,10 +653,10 @@ fn format_detail(
                 state_icon(&issue.state.state_type),
                 issue.state.name
             ),
-            format!("우선순위 {}", priority_label(issue.priority)),
+            (t().priority_named)(priority_label(issue.priority)),
             match &issue.assignee {
                 Some(a) => format!("@{}", a.display_name),
-                None => "담당자 없음".to_string(),
+                None => t().no_assignee.to_string(),
             },
         ]
         .join(" · "),
@@ -686,21 +667,20 @@ fn format_detail(
         extra.push(labels.join(", "));
     }
     if let Some(p) = &issue.project {
-        extra.push(format!("프로젝트 {}", p.name));
+        extra.push((t().project_named)(&p.name));
     }
     if let Some(c) = &issue.cycle {
-        extra.push(format!(
-            "사이클 {}",
-            c.name
+        extra.push((t().cycle_named)(
+            &c.name
                 .clone()
-                .unwrap_or_else(|| (c.number as i64).to_string())
+                .unwrap_or_else(|| (c.number as i64).to_string()),
         ));
     }
     if let Some(e) = issue.estimate {
-        extra.push(format!("예상 {e}"));
+        extra.push((t().estimate_named)(&e.to_string()));
     }
     if let Some(d) = &issue.due_date {
-        extra.push(format!("마감 {d}"));
+        extra.push((t().due_named)(d));
     }
     if !extra.is_empty() {
         out.push(extra.join(" · "));
@@ -721,23 +701,19 @@ fn format_detail(
     out.push(String::new());
     let body = issue.description.as_deref().unwrap_or("").trim();
     if body.is_empty() {
-        out.push("(본문 없음)".to_string());
+        out.push(t().no_body.to_string());
     } else {
         out.push(render_md(ctx, body, &theme, team_keys));
     }
     if !comments.is_empty() {
         out.push(String::new());
-        out.push(format!(
-            "── 코멘트 {}{} ──",
-            comments.len(),
-            if more { "+" } else { "" }
-        ));
+        out.push((t().comments_header)(comments.len(), more));
         for c in comments {
             let who = c
                 .user
                 .as_ref()
                 .map(|u| u.display_name.as_str())
-                .unwrap_or("알 수 없음");
+                .unwrap_or(t().unknown_user);
             out.push(String::new());
             out.push(markdown::sanitize(&format!(
                 "{who} · {}",
@@ -747,7 +723,7 @@ fn format_detail(
         }
         if more {
             out.push(String::new());
-            out.push("코멘트가 더 있어요. 브라우저에서 보세요".to_string());
+            out.push(t().more_comments_cli.to_string());
         }
     }
     out.join("\n")
@@ -1588,5 +1564,46 @@ mod tests {
         };
         check("ko");
         with_lang(Lang::En, || check("en"));
+    }
+
+    #[test]
+    fn detail_and_errors_follow_the_language() {
+        let mut server = mockito::Server::new();
+        let mut issue = IssueBuilder::new("i1", "ENG-1", "Login bug")
+            .state("In Progress", "started")
+            .priority(2)
+            .description("Steps")
+            .json();
+        issue["comments"] = json!({
+            "nodes": [ { "id": "c1", "body": "On it", "createdAt": "2026-10-01T00:00:00.000Z",
+                         "editedAt": null, "user": null } ],
+            "pageInfo": { "hasNextPage": true, "endCursor": "c1" }
+        });
+        server
+            .mock("POST", "/graphql")
+            .match_body(Matcher::Regex("query Detail".into()))
+            .with_body(json!({ "data": { "issue": issue } }).to_string())
+            .create();
+        let (_d, ctx) = test_ctx(url(&server));
+        let out = with_lang(Lang::En, || show(&ctx, "ENG-1").unwrap());
+        assert!(
+            out.starts_with("ENG-1  Login bug\n◐ In Progress · Priority High · Unassigned\n"),
+            "{out}"
+        );
+        assert!(out.contains("── Comments 1+ ──"), "{out}");
+        assert!(out.contains("Unknown · "), "{out}");
+        assert!(
+            out.contains("There are more comments. See them in the browser"),
+            "{out}"
+        );
+        assert!(!crate::i18n::has_hangul(&out), "{out}");
+        let (_d2, offline) = test_ctx(OFFLINE.into());
+        let err = with_lang(Lang::En, || {
+            search(&offline, "l:bug", true).unwrap_err().to_string()
+        });
+        assert_eq!(err, "Deep search needs search text");
+        let err = with_lang(Lang::En, || format!("{:#}", mine(&offline).unwrap_err()));
+        assert!(err.starts_with("Offline"), "{err}");
+        assert!(!crate::i18n::has_hangul(&err), "{err}");
     }
 }

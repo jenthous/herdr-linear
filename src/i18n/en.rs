@@ -181,6 +181,50 @@ pub const EN: Texts = Texts {
     checking: "Checking…",
     key_label: "Key: ",
     confirm_close: "⏎ confirm · Esc close",
+    login_prompt: "Linear API key (Linear → Settings → Security & access → Personal API keys): ",
+    login_env_note: "\nNote: LINEAR_API_KEY is set, so its value is used first",
+    key_empty: "The key is empty",
+    cache_open_warning: |e| {
+        format!("warning: couldn't open the cache, running without saving this time ({e})")
+    },
+    logged_out: "Deleted the API key and cache",
+    whoami_offline: "Offline, so the account info can't be fetched",
+    whoami_workspace: |name, key| format!("Workspace: {name} ({key})"),
+    whoami_teams: |teams| format!("Teams: {teams}"),
+    whoami_scope: |n| {
+        if n == 1 {
+            "Search scope: 1 team".to_string()
+        } else {
+            format!("Search scope: {n} teams")
+        }
+    },
+    whoami_remaining: |r| format!("Requests left: {r} (per hour)"),
+    scope_warning: |teams| {
+        format!("warning: no team matches teams ({teams}) in config, so all teams are searched")
+    },
+    offline_no_results_for_key: |m| format!("Offline, and nothing is saved for this key: {m}"),
+    offline_saved_results: |ago, m| format!("Offline: results saved {ago} · {m}"),
+    offline_no_results: |m| format!("Offline, and there are no saved results: {m}"),
+    deep_needs_query: "Deep search needs search text",
+    offline_no_issues_for_key: |m| format!("Offline, and no issues are saved for this key: {m}"),
+    offline_local_only: |m| format!("Offline: searched saved issues only · {m}"),
+    issue_gone: |id| format!("{id} was archived or deleted"),
+    issue_not_found: |id| {
+        format!("Can't find issue {id} (it may be archived or deleted, or you may not have access)")
+    },
+    offline_issue_not_saved_for_key: |id, m| {
+        format!("Offline, and {id} isn't saved for this key: {m}")
+    },
+    offline_issue_not_saved: |id, m| format!("Offline, and {id} isn't saved: {m}"),
+    offline_saved_detail: |m| format!("Offline: saved copy · {m}"),
+    more_comments_cli: "There are more comments. See them in the browser",
+    herdr_busy: "Another herdr window, such as settings or copy mode, is open. Close it and try again",
+    herdr_failed_status: |s| format!("herdr command failed ({s})"),
+    herdr_failed: |e| format!("herdr command failed: {e}"),
+    palette_open_failed: |e| format!("Couldn't open the palette: {e}"),
+    side_toggle_failed: |e| format!("Couldn't open or close the side pane: {e}"),
+    unknown_workspace: "Can't tell which workspace this is",
+    herdr_missing_field: |p| format!("No {p} in the herdr response"),
 };
 
 /// "1 minute", "5 minutes"

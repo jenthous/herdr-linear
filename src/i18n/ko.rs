@@ -168,4 +168,40 @@ pub const KO: Texts = Texts {
     checking: "확인 중…",
     key_label: "키: ",
     confirm_close: "⏎ 확인 · Esc 닫기",
+    login_prompt: "Linear API 키 (Linear → Settings → Security & access → Personal API keys): ",
+    login_env_note: "\n참고: LINEAR_API_KEY 환경 변수가 설정돼 있어서 그 값이 우선 쓰여요",
+    key_empty: "키가 비어 있어요",
+    cache_open_warning: |e| format!("경고: 캐시를 열지 못해 이번에는 저장 없이 실행해요 ({e})"),
+    logged_out: "API 키와 캐시를 지웠어요",
+    whoami_offline: "오프라인이라 계정 정보를 가져올 수 없어요",
+    whoami_workspace: |name, key| format!("워크스페이스: {name} ({key})"),
+    whoami_teams: |teams| format!("팀: {teams}"),
+    whoami_scope: |n| format!("검색 범위: 팀 {n}개"),
+    whoami_remaining: |r| format!("남은 요청: {r} (시간당)"),
+    scope_warning: |teams| {
+        format!("경고: config의 teams({teams})와 맞는 팀이 없어서 모든 팀에서 찾아요")
+    },
+    offline_no_results_for_key: |m| format!("오프라인이고 이 키로 저장된 결과가 없어요: {m}"),
+    offline_saved_results: |ago, m| format!("오프라인: {ago} 저장된 결과 · {m}"),
+    offline_no_results: |m| format!("오프라인이고 저장된 결과도 없어요: {m}"),
+    deep_needs_query: "깊은 검색에는 검색어가 필요해요",
+    offline_no_issues_for_key: |m| format!("오프라인이고 이 키로 저장된 이슈가 없어요: {m}"),
+    offline_local_only: |m| format!("오프라인: 저장된 이슈에서만 찾았어요 · {m}"),
+    issue_gone: |id| format!("{id}은(는) 보관되었거나 삭제된 이슈예요"),
+    issue_not_found: |id| {
+        format!("{id} 이슈를 찾을 수 없어요 (보관·삭제됐거나 권한이 없을 수 있어요)")
+    },
+    offline_issue_not_saved_for_key: |id, m| {
+        format!("오프라인이고 이 키로 저장된 {id}도 없어요: {m}")
+    },
+    offline_issue_not_saved: |id, m| format!("오프라인이고 저장된 {id}도 없어요: {m}"),
+    offline_saved_detail: |m| format!("오프라인: 저장된 내용 · {m}"),
+    more_comments_cli: "코멘트가 더 있어요. 브라우저에서 보세요",
+    herdr_busy: "herdr에 설정·복사 모드 같은 다른 창이 떠 있어요. 닫고 다시 시도하세요",
+    herdr_failed_status: |s| format!("herdr 명령이 실패했어요 ({s})"),
+    herdr_failed: |e| format!("herdr 명령이 실패했어요: {e}"),
+    palette_open_failed: |e| format!("팔레트를 열지 못했어요: {e}"),
+    side_toggle_failed: |e| format!("사이드 pane을 열거나 닫지 못했어요: {e}"),
+    unknown_workspace: "어느 워크스페이스인지 알 수 없어요",
+    herdr_missing_field: |p| format!("herdr 응답에서 {p}를 찾지 못했어요"),
 };

@@ -9,6 +9,7 @@ use serde_json::Value;
 
 use crate::config::{APP_NAME, PLUGIN_ID};
 use crate::context::{Origin, PluginContext};
+use crate::i18n::t;
 use crate::log::Logger;
 use crate::side::SidePanes;
 
@@ -126,7 +127,7 @@ impl Herdr {
         let out = Command::new(&self.bin)
             .args(args)
             .output()
-            .with_context(|| format!("{}을 실행하지 못했어요", self.bin.display()))?;
+            .with_context(|| (t().run_failed)(&self.bin.display().to_string()))?;
         if out.status.success() {
             return Ok(String::from_utf8_lossy(&out.stdout).into_owned());
         }
@@ -136,12 +137,12 @@ impl Herdr {
             err = String::from_utf8_lossy(&out.stdout).trim().to_string();
         }
         if err.contains("ui_busy") {
-            bail!("herdr에 설정·복사 모드 같은 다른 창이 떠 있어요. 닫고 다시 시도하세요");
+            bail!("{}", t().herdr_busy);
         }
         if err.is_empty() {
-            bail!("herdr 명령이 실패했어요 ({})", out.status);
+            bail!("{}", (t().herdr_failed_status)(&out.status.to_string()));
         }
-        bail!("herdr 명령이 실패했어요: {err}")
+        bail!("{}", (t().herdr_failed)(&err))
     }
 }
 
@@ -151,7 +152,7 @@ pub fn open_palette(herdr: &Herdr, origin: &Origin, log: &Logger) -> Result<()> 
     herdr
         .open_pane("palette", &origin.to_env())
         .inspect_err(|e| {
-            let text = format!("팔레트를 열지 못했어요: {e:#}");
+            let text = (t().palette_open_failed)(&format!("{e:#}"));
             log.write(&text);
             let _ = herdr.notify("Linear", &text);
         })
@@ -167,7 +168,7 @@ pub fn toggle_side(
     log: &Logger,
 ) -> Result<()> {
     switch_side(herdr, panes, workspace, ctx).inspect_err(|e| {
-        let text = format!("사이드 pane을 열거나 닫지 못했어요: {e:#}");
+        let text = (t().side_toggle_failed)(&format!("{e:#}"));
         log.write(&text);
         let _ = herdr.notify("Linear", &text);
     })
@@ -191,7 +192,7 @@ fn switch_side(
                 .focused_pane_id
                 .as_deref()
                 .filter(|p| !p.trim().is_empty())
-                .context("어느 워크스페이스인지 알 수 없어요")?;
+                .context(t().unknown_workspace)?;
             herdr.pane_workspace(pane)?
         }
     };
@@ -232,7 +233,7 @@ fn json_text(out: &str, pointer: &str) -> Result<String> {
     serde_json::from_str::<Value>(out)
         .ok()
         .and_then(|v| v.pointer(pointer)?.as_str().map(String::from))
-        .with_context(|| format!("herdr 응답에서 {pointer}를 찾지 못했어요"))
+        .with_context(|| (t().herdr_missing_field)(pointer))
 }
 
 #[cfg(all(test, unix))]

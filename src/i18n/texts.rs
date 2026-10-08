@@ -219,4 +219,57 @@ pub struct Texts {
     /// 키 입력 칸 이름표. 커서 위치가 이 폭을 따른다
     pub key_label: &'static str,
     pub confirm_close: &'static str,
+    // ── CLI 출력 (`cli`) ──
+    pub login_prompt: &'static str,
+    pub login_env_note: &'static str,
+    pub key_empty: &'static str,
+    /// 오류 문구
+    pub cache_open_warning: fn(&str) -> String,
+    pub logged_out: &'static str,
+    pub whoami_offline: &'static str,
+    /// (워크스페이스 이름, URL 키)
+    pub whoami_workspace: fn(&str, &str) -> String,
+    /// 팀 목록
+    pub whoami_teams: fn(&str) -> String,
+    /// 검색 범위 팀 수
+    pub whoami_scope: fn(usize) -> String,
+    /// 시간당 남은 요청 수
+    pub whoami_remaining: fn(i64) -> String,
+    /// config의 teams 목록
+    pub scope_warning: fn(&str) -> String,
+    /// 오류 문구
+    pub offline_no_results_for_key: fn(&str) -> String,
+    /// (저장 시각 `ago`, 오류 문구)
+    pub offline_saved_results: fn(&str, &str) -> String,
+    /// 오류 문구
+    pub offline_no_results: fn(&str) -> String,
+    pub deep_needs_query: &'static str,
+    /// 오류 문구
+    pub offline_no_issues_for_key: fn(&str) -> String,
+    /// 오류 문구
+    pub offline_local_only: fn(&str) -> String,
+    /// 이슈 식별자
+    pub issue_gone: fn(&str) -> String,
+    /// 이슈 식별자
+    pub issue_not_found: fn(&str) -> String,
+    /// (식별자, 오류 문구)
+    pub offline_issue_not_saved_for_key: fn(&str, &str) -> String,
+    /// (식별자, 오류 문구)
+    pub offline_issue_not_saved: fn(&str, &str) -> String,
+    /// 오류 문구
+    pub offline_saved_detail: fn(&str) -> String,
+    pub more_comments_cli: &'static str,
+    // ── herdr (`herdr`) ──
+    pub herdr_busy: &'static str,
+    /// 종료 상태
+    pub herdr_failed_status: fn(&str) -> String,
+    /// herdr 오류 출력
+    pub herdr_failed: fn(&str) -> String,
+    /// 오류 문구
+    pub palette_open_failed: fn(&str) -> String,
+    /// 오류 문구
+    pub side_toggle_failed: fn(&str) -> String,
+    pub unknown_workspace: &'static str,
+    /// JSON 포인터
+    pub herdr_missing_field: fn(&str) -> String,
 }
