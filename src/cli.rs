@@ -872,7 +872,7 @@ mod tests {
         );
         let (_d, ctx) = test_ctx(url(&server));
         let out = mine(&ctx).unwrap();
-        assert_eq!(out, "◐ ENG-1         진행 중  [bug]\n○ ENG-2         할 일");
+        assert_eq!(out, "◐ ENG-1       진행 중  [bug]\n○ ENG-2       할 일");
         let (saved, _) = ctx.store.get_view("mine").unwrap().unwrap();
         assert_eq!(
             saved
@@ -933,8 +933,8 @@ mod tests {
             )
             .unwrap();
         let out = search(&ctx, "로그인", false).unwrap();
-        assert!(out.contains("ENG-1         로그인 버튼"), "{out}");
-        assert!(out.contains("OPS-9         로그인 서버"), "{out}");
+        assert!(out.contains("ENG-1       로그인 버튼"), "{out}");
+        assert!(out.contains("OPS-9       로그인 서버"), "{out}");
         m.assert();
         // 서버 결과는 캐시에 저장된다
         assert!(ctx.store.get_issue("ENG-1").unwrap().is_some());
@@ -1190,7 +1190,7 @@ mod tests {
             .build();
         assert_eq!(
             issue_line(&issue),
-            "○ ENG-1         로그인[2J 버그  @민수]0;x"
+            "○ ENG-1       로그인[2J 버그  @민수]0;x"
         );
         let (_d, ctx) = test_ctx(OFFLINE.into());
         trust_cache(&ctx);
@@ -1501,13 +1501,13 @@ mod tests {
     }
 
     #[test]
-    fn plain_list_line_shows_priority_bars() {
+    fn plain_list_line_shows_the_priority_mark() {
         let line =
             |p: i64| issue_line(&IssueBuilder::new("i1", "ENG-1", "제목").priority(p).build());
-        assert_eq!(line(1), "○ ENG-1      !  제목");
-        assert_eq!(line(2), "○ ENG-1     ▂▄▆ 제목");
-        assert_eq!(line(3), "○ ENG-1     ▂▄  제목");
-        assert_eq!(line(4), "○ ENG-1     ▂   제목");
-        assert_eq!(line(0), "○ ENG-1         제목");
+        assert_eq!(line(1), "○ ENG-1     ! 제목");
+        assert_eq!(line(2), "○ ENG-1     ▆ 제목");
+        assert_eq!(line(3), "○ ENG-1     ▄ 제목");
+        assert_eq!(line(4), "○ ENG-1     ▂ 제목");
+        assert_eq!(line(0), "○ ENG-1       제목");
     }
 }

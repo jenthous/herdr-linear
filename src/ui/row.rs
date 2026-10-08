@@ -2,7 +2,7 @@
 
 use ratatui::text::{Line, Span};
 
-use super::style::{DIM, label_style, priority_spans, state_icon, state_style, truncate};
+use super::style::{DIM, label_style, priority_span, state_icon, state_style, truncate};
 use crate::linear::types::Issue;
 use crate::markdown::sanitize;
 
@@ -20,7 +20,7 @@ pub fn issue_row(issue: &Issue, width: u16) -> Line<'static> {
         ),
         Span::styled(format!("{:<9} ", sanitize(&issue.identifier)), DIM),
     ];
-    spans.extend(priority_spans(issue.priority));
+    spans.push(priority_span(issue.priority));
     spans.push(Span::raw(" "));
     let fixed: usize = spans.iter().map(Span::width).sum();
     let mut tail: Vec<Span<'static>> = Vec::new();
@@ -66,7 +66,7 @@ mod tests {
         let line = issue_row(&issue(), 80);
         assert_eq!(
             to_plain(std::slice::from_ref(&line)),
-            "◐ UP-1812       데이터 손상 수정  Bug Backend  @jhhan"
+            "◐ UP-1812     데이터 손상 수정  Bug Backend  @jhhan"
         );
         assert_eq!(line.spans[0].style.fg, Some(Color::Rgb(94, 106, 210)));
         let bug = line.spans.iter().find(|s| s.content == "Bug").unwrap();
@@ -95,7 +95,7 @@ mod tests {
     }
 
     #[test]
-    fn priority_bars_sit_between_identifier_and_title() {
+    fn priority_mark_sits_between_identifier_and_title() {
         let row = |p: i64| {
             issue_row(
                 &IssueBuilder::new("i1", "ENG-1", "제목").priority(p).build(),
@@ -103,17 +103,17 @@ mod tests {
             )
         };
         let text = |p: i64| to_plain(&[row(p)]);
-        assert_eq!(text(1), "○ ENG-1      !  제목");
-        assert_eq!(text(2), "○ ENG-1     ▂▄▆ 제목");
-        assert_eq!(text(4), "○ ENG-1     ▂▄▆ 제목", "낮음도 3칸 (▄▆는 흐림)");
-        assert_eq!(text(0), "○ ENG-1         제목");
+        assert_eq!(text(1), "○ ENG-1     ! 제목");
+        assert_eq!(text(2), "○ ENG-1     ▆ 제목");
+        assert_eq!(text(4), "○ ENG-1     ▂ 제목", "낮음은 가장 낮은 막대");
+        assert_eq!(text(0), "○ ENG-1       제목");
         let urgent = row(1);
         let bang = urgent.spans.iter().find(|s| s.content == "!").unwrap();
         assert_eq!(bang.style.fg, Some(Color::Red));
     }
 
     #[test]
-    fn narrow_row_keeps_the_priority_bars() {
+    fn narrow_row_keeps_the_priority_mark() {
         let i = IssueBuilder::new("i1", "UP-1812", "데이터 손상 수정")
             .priority(2)
             .labels(&["Bug"])
@@ -121,7 +121,7 @@ mod tests {
         for width in [24, 16] {
             let line = issue_row(&i, width);
             let text = to_plain(std::slice::from_ref(&line));
-            assert!(text.starts_with("○ UP-1812   ▂▄▆ "), "{text}");
+            assert!(text.starts_with("○ UP-1812   ▆ "), "{text}");
             assert!(!text.contains("Bug"), "{text}");
             assert!(line.width() <= usize::from(width), "{text}");
         }
