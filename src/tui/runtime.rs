@@ -795,9 +795,14 @@ fn event_loop(
                 }
                 _ => None,
             };
-            if let Some(input) = input {
-                changed = true;
-                effects.extend(app.handle(input, now_ms()));
+            match input {
+                // 움직임은 초당 수십 번 온다. 같은 대상 위의 움직임은 화면을 바꾸지 않는다
+                Some(Input::Hover(target)) if target == app.hover => {}
+                Some(input) => {
+                    changed = true;
+                    effects.extend(app.handle(input, now_ms()));
+                }
+                None => {}
             }
         }
     }

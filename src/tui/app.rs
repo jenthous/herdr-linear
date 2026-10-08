@@ -119,6 +119,20 @@ pub enum Input {
     ClickMenu(usize),
     /// 상세 화면의 관계 줄(`ui::relations::rows` 번호)을 눌렀다
     ClickRelation(usize),
+    /// 마우스가 움직였다. 그 자리에 누를 수 있는 대상이 있으면 그 대상
+    Hover(Option<Target>),
+}
+
+/// 마우스로 누를 수 있는 대상.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Target {
+    /// 목록의 n번째 줄 (`App::rows` 기준)
+    Row(usize),
+    Tab(Tab),
+    /// 메뉴에 보이는 n번째 항목
+    MenuItem(usize),
+    /// 상세 화면의 관계 줄 (`ui::relations::rows` 번호)
+    Relation(usize),
 }
 
 /// 앱이 런타임에 요청하는 일.
@@ -285,6 +299,8 @@ pub struct App {
     /// 관계 이슈를 열 때 쌓아 둔 상세. Esc로 하나씩 돌아간다
     detail_stack: Vec<Detail>,
     pub menu: Option<Menu>,
+    /// 마우스가 올라간 대상. 마우스 움직임이 아닌 입력이 오면 지운다
+    pub hover: Option<Target>,
     pub key_input: String,
     pub key_error: Option<String>,
     pub key_checking: bool,
@@ -322,6 +338,7 @@ impl App {
             detail: None,
             detail_stack: Vec::new(),
             menu: None,
+            hover: None,
             key_input: String::new(),
             key_error: None,
             key_checking: false,
@@ -493,6 +510,12 @@ impl App {
 
     /// 키 입력을 처리한다.
     pub fn handle(&mut self, input: Input, now: i64) -> Vec<Effect> {
+        // 마우스 움직임은 밝힐 대상만 바꾼다. 다른 입력이 오면 지우고, 다음 움직임 때 다시 잡는다
+        if let Input::Hover(target) = input {
+            self.hover = target;
+            return Vec::new();
+        }
+        self.hover = None;
         if input == Input::Quit {
             self.quit = true;
             return Vec::new();
@@ -2224,5 +2247,28 @@ mod tests {
             vec![Effect::OpenDetail("ENG-10".into())],
             "알려진 상위는 관계를 몰라도 열 수 있다"
         );
+    }
+
+    #[test]
+    fn hover_follows_the_mouse_and_other_input_clears_it() {
+        let mut app = started();
+        assert!(
+            app.handle(Input::Hover(Some(Target::Row(1))), T0)
+                .is_empty()
+        );
+        assert_eq!(app.hover, Some(Target::Row(1)));
+        assert_eq!(app.selected, 0, "hover는 선택을 바꾸지 않는다");
+        app.handle(Input::Hover(None), T0);
+        assert_eq!(app.hover, None, "대상 밖으로 나가면 지운다");
+        for input in [
+            Input::Down,
+            Input::ScrollDown,
+            Input::ClickRow(0),
+            Input::Paste("x".into()),
+        ] {
+            app.handle(Input::Hover(Some(Target::Row(1))), T0);
+            app.handle(input.clone(), T0);
+            assert_eq!(app.hover, None, "{input:?}");
+        }
     }
 }

@@ -105,7 +105,7 @@ pub fn translate(mode: Mode, menu_open: bool, key: KeyEvent) -> Option<Input> {
     }
 }
 
-/// 마우스 이벤트를 `Input`으로 바꾼다. 누른 곳은 마지막으로 그린 화면(`Drawn`)에서 찾는다.
+/// 마우스 이벤트를 `Input`으로 바꾼다. 누른 곳과 마우스가 올라간 곳은 마지막으로 그린 화면(`Drawn`)에서 찾는다.
 pub fn mouse(drawn: &Drawn, ev: MouseEvent) -> Option<Input> {
     match ev.kind {
         MouseEventKind::ScrollUp => Some(Input::ScrollUp),
@@ -120,6 +120,7 @@ pub fn mouse(drawn: &Drawn, ev: MouseEvent) -> Option<Input> {
                     Target::Relation(i) => Input::ClickRelation(i),
                 })
         }
+        MouseEventKind::Moved => Some(Input::Hover(drawn.target_at(ev.column, ev.row))),
         _ => None,
     }
 }
@@ -277,7 +278,16 @@ mod tests {
             mouse(&drawn, ev(MouseEventKind::Down(MouseButton::Right), 3, 2)),
             None
         );
-        assert_eq!(mouse(&drawn, ev(MouseEventKind::Moved, 3, 2)), None);
+        assert_eq!(
+            mouse(&drawn, ev(MouseEventKind::Moved, 12, 2)),
+            Some(Input::Hover(Some(Target::MenuItem(0)))),
+            "움직임은 맨 위 대상을 잡는다"
+        );
+        assert_eq!(
+            mouse(&drawn, ev(MouseEventKind::Moved, 3, 9)),
+            Some(Input::Hover(None)),
+            "빈 곳"
+        );
     }
 
     #[test]

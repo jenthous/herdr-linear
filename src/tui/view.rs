@@ -7,6 +7,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
+pub use super::app::Target;
 use super::app::{Act, App, Detail, Mode, Problem, Row, Tab};
 use crate::linear::types::Issue;
 use crate::markdown::{self, Theme, sanitize};
@@ -20,20 +21,10 @@ use crate::ui::style::{
 pub const PREVIEW_MIN_WIDTH: u16 = 100;
 
 const SELECTED_BG: Style = Style::new().bg(Color::Rgb(45, 45, 60));
+/// 마우스가 올라간 곳. 고른 줄(`SELECTED_BG`)보다 옅다
+const HOVER_BG: Style = Style::new().bg(Color::Rgb(35, 35, 46));
 const WARN: Style = Style::new().fg(Color::Yellow);
 const ERROR: Style = Style::new().fg(Color::Red);
-
-/// 마우스로 누를 수 있는 대상.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Target {
-    /// 목록의 n번째 줄 (`App::rows` 기준)
-    Row(usize),
-    Tab(Tab),
-    /// 메뉴에 보이는 n번째 항목
-    MenuItem(usize),
-    /// 상세 화면의 관계 줄 (`ui::relations::rows` 번호)
-    Relation(usize),
-}
 
 /// 화면에서 누를 수 있는 곳.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,7 +100,29 @@ pub fn draw(f: &mut Frame, app: &App, now: i64) -> Drawn {
     if app.menu.is_some() {
         drawn.hits.extend(draw_menu(f, app, area));
     }
+    paint_hover(f, app, &drawn.hits);
     drawn
+}
+
+/// 마우스가 올라간 대상을 옅게 칠한다. 고른 줄과 고른 메뉴 항목은 선택 색을 그대로 둔다.
+/// 메뉴가 열려 있으면 메뉴 항목만 칠한다 (클릭도 맨 위에 그린 대상만 잡는다).
+fn paint_hover(f: &mut Frame, app: &App, hits: &[Hit]) {
+    let Some(target) = app.hover else {
+        return;
+    };
+    let paint = match (target, &app.menu) {
+        (Target::MenuItem(i), Some(menu)) => i != menu.selected,
+        (Target::Row(i), None) => i != app.selected,
+        (Target::Tab(_) | Target::Relation(_), None) => true,
+        _ => false,
+    };
+    if !paint {
+        return;
+    }
+    // 그 대상이 이 프레임에 없으면(줄이 사라짐) 칠하지 않는다
+    if let Some(hit) = hits.iter().rev().find(|h| h.target == target) {
+        f.buffer_mut().set_style(hit.area, HOVER_BG);
+    }
 }
 
 /// 탭 이름의 위치를 함께 돌려준다 (마우스로 탭 전환).
@@ -713,7 +726,21 @@ mod tests {
         let related = related_detail("본문");
         let mut related_menu = related_detail("본문");
         related_menu.handle(Input::Act(Act::Relations), T0);
-        for app in [&app(), &detail, &menu, &onboarding, &related, &related_menu] {
+        let mut hovered = app();
+        hovered.handle(Input::Hover(Some(Target::Row(1))), T0);
+        let mut hovered_menu = app();
+        hovered_menu.handle(Input::Menu, T0);
+        hovered_menu.handle(Input::Hover(Some(Target::MenuItem(2))), T0);
+        for app in [
+            &app(),
+            &detail,
+            &menu,
+            &onboarding,
+            &related,
+            &related_menu,
+            &hovered,
+            &hovered_menu,
+        ] {
             for (w, h) in [(1, 1), (5, 3), (12, 4), (20, 5), (30, 8)] {
                 screen(app, w, h);
             }
@@ -1365,5 +1392,71 @@ mod tests {
             .find(|&x| buf[(x, y)].symbol() == "막")
             .expect("막힘 글자");
         assert_eq!(buf[(x, y)].fg, Color::Red, "안 끝난 막는 이슈");
+    }
+
+    const HOVER: Color = Color::Rgb(35, 35, 46);
+    const SELECTED: Color = Color::Rgb(45, 45, 60);
+
+    /// 120×16 화면에서 `target` 자리의 첫 칸 배경.
+    fn bg_of(a: &App, target: Target) -> Color {
+        let (_, drawn, term) = screen(a, 120, 16);
+        let hit = drawn
+            .hits
+            .iter()
+            .rev()
+            .find(|h| h.target == target)
+            .expect("그린 대상");
+        term.backend().buffer()[(hit.area.x, hit.area.y)].bg
+    }
+
+    #[test]
+    fn hovered_rows_tabs_and_menu_items_get_a_light_background() {
+        let mut a = app();
+        for target in [Target::Row(1), Target::Tab(Tab::Recent)] {
+            a.handle(Input::Hover(Some(target)), T0);
+            assert_eq!(bg_of(&a, target), HOVER, "{target:?}");
+        }
+        a.handle(Input::Hover(Some(Target::Row(0))), T0);
+        assert_eq!(
+            bg_of(&a, Target::Row(0)),
+            SELECTED,
+            "고른 줄은 선택 색 그대로"
+        );
+        a.handle(Input::Hover(None), T0);
+        assert_eq!(bg_of(&a, Target::Row(1)), Color::Reset, "나가면 지운다");
+        // 메뉴가 열려 있으면 메뉴 항목만 밝힌다
+        a.handle(Input::Menu, T0);
+        a.handle(Input::Hover(Some(Target::MenuItem(1))), T0);
+        assert_eq!(bg_of(&a, Target::MenuItem(1)), HOVER);
+        a.handle(Input::Hover(Some(Target::MenuItem(0))), T0);
+        assert_eq!(bg_of(&a, Target::MenuItem(0)), SELECTED, "고른 항목");
+        a.handle(Input::Hover(Some(Target::Row(1))), T0);
+        assert_eq!(
+            bg_of(&a, Target::Row(1)),
+            Color::Reset,
+            "메뉴 아래 목록은 밝히지 않는다"
+        );
+    }
+
+    #[test]
+    fn hovered_relation_line_gets_a_light_background() {
+        let mut a = related_detail("본문");
+        a.handle(Input::Hover(Some(Target::Relation(1))), T0);
+        assert_eq!(bg_of(&a, Target::Relation(1)), HOVER);
+        assert_eq!(bg_of(&a, Target::Relation(0)), Color::Reset);
+    }
+
+    #[test]
+    fn hover_on_a_row_that_is_gone_paints_nothing() {
+        let mut a = app();
+        a.handle(Input::Hover(Some(Target::Row(5))), T0);
+        let (_, _, term) = screen(&a, 120, 16);
+        assert!(
+            term.backend()
+                .buffer()
+                .content()
+                .iter()
+                .all(|c| c.bg != HOVER)
+        );
     }
 }
