@@ -28,11 +28,14 @@ target_for() {
   esac
 }
 
-# 막 올린 릴리스는 몇 분 동안 404가 날 수 있어서 5번까지 다시 시도한다
+# 막 올린 릴리스는 몇 분 동안 404가 날 수 있어서 5번까지 시도한다.
+# 연결이 멈추면 끝없이 기다리지 않게 연결 15초, 30초 동안 1KB/s 미만이면 그 시도를 포기한다.
+# curl의 오류는 따로 받아 두었다가 마지막 이유만 우리 말머리로 알린다
 fetch() {
   local attempt=1
-  while ! curl -fsSL "$1" -o "$2"; do
+  while ! curl -fsSL --connect-timeout 15 --speed-limit 1024 --speed-time 30 "$1" -o "$2" 2>"$tmp/curl.err"; do
     if [ "$attempt" -ge 5 ]; then
+      say "could not download $1: $(awk 'END {print}' "$tmp/curl.err")"
       return 1
     fi
     attempt=$((attempt + 1))
@@ -57,6 +60,10 @@ install_prebuilt() {
   local target archive sums expected actual
   if [ "${HERDR_LINEAR_BUILD_FROM_SOURCE:-}" = "1" ]; then
     say "HERDR_LINEAR_BUILD_FROM_SOURCE=1, skipping the prebuilt binary"
+    return 1
+  fi
+  if ! command -v curl >/dev/null 2>&1; then
+    say "curl is not installed, so the prebuilt binary cannot be downloaded"
     return 1
   fi
   if [ -z "$version" ]; then

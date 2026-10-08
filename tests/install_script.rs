@@ -188,6 +188,11 @@ fn falls_back_to_cargo_when_this_version_has_no_release() {
     let out = run(dir.path(), &root, &releases, Some(&cargo), &[]);
     assert!(out.status.success(), "{}", text(&out));
     assert!(text(&out).contains("could not download"), "{}", text(&out));
+    assert!(
+        text(&out).contains("herdr-linear: could not download file://"),
+        "{}",
+        text(&out)
+    );
     let called = fs::read_to_string(root.join("cargo-called")).unwrap();
     assert_eq!(called.trim(), "build --release", "플러그인 루트에서 불린다");
     assert_eq!(installed(&root), "from-source");
@@ -269,4 +274,54 @@ fn failed_install_keeps_the_existing_binary() {
     let out = run(dir.path(), &root, &releases, None, &[]);
     assert!(!out.status.success(), "{}", text(&out));
     assert_eq!(installed(&root), "old");
+}
+
+#[test]
+fn missing_curl_is_explained() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = plugin_root(dir.path(), "9.9.9");
+    let releases = release(dir.path(), "9.9.9", "herdr-linear", None);
+    // curl만 빠진 PATH를 만든다
+    let tools = dir.path().join("tools");
+    fs::create_dir_all(&tools).unwrap();
+    for tool in [
+        "awk",
+        "mktemp",
+        "tar",
+        "install",
+        "mv",
+        "rm",
+        "mkdir",
+        "dirname",
+        "uname",
+        "sleep",
+        "shasum",
+        "sha256sum",
+    ] {
+        for base in ["/usr/bin", "/bin", "/sbin"] {
+            let src = Path::new(base).join(tool);
+            if src.exists() && !tools.join(tool).exists() {
+                std::os::unix::fs::symlink(&src, tools.join(tool)).unwrap();
+            }
+        }
+    }
+    let out = Command::new("/bin/bash")
+        .arg(root.join("scripts/install.sh"))
+        .current_dir(dir.path())
+        .env_clear()
+        .env("PATH", &tools)
+        .env("HOME", dir.path())
+        .env(
+            "HERDR_LINEAR_RELEASES",
+            format!("file://{}", releases.display()),
+        )
+        .env("HERDR_LINEAR_TARGET", TARGET)
+        .env("HERDR_LINEAR_RETRY_SECONDS", "0")
+        .output()
+        .unwrap();
+    let t = text(&out);
+    assert!(!out.status.success(), "{t}");
+    assert!(t.contains("curl is not installed"), "{t}");
+    assert!(t.contains("https://rustup.rs"), "{t}");
+    assert!(!root.join("target/release/herdr-linear").exists());
 }
