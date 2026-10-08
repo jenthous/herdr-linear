@@ -14,6 +14,7 @@ use crate::cli::{now_ms, open_store};
 use crate::config::{self, Paths};
 use crate::context::Origin;
 use crate::herdr::Herdr;
+use crate::i18n::t;
 use crate::linear::client::LinearClient;
 use crate::log::Logger;
 use crate::side::SidePanes;
@@ -27,7 +28,7 @@ use system::RealSystem;
 pub fn palette(paths: Paths) -> Result<()> {
     let log = Logger::new(paths.log_file());
     let (rt, app, effects) = log.on_err(
-        "팔레트 시작",
+        t().log_palette_start,
         prepare(paths, std::env::var("LINEAR_API_KEY").ok(), false),
     )?;
     runtime::run(rt, app, effects)
@@ -41,21 +42,19 @@ pub fn side(paths: Paths) -> Result<()> {
     let me = own_pane(|k| std::env::var(k).ok(), &Herdr::from_env());
     match &me {
         Some((pane, workspace)) => {
-            log.write(&format!(
-                "사이드 pane 시작: pane {pane}, 워크스페이스 {workspace}"
-            ));
-            let _ = log.on_err("사이드 pane 기록", panes.set(workspace, pane));
+            log.write(&(t().log_side_started)(pane, workspace));
+            let _ = log.on_err(t().log_side_record, panes.set(workspace, pane));
         }
-        None => log.write("사이드 pane 시작: 자기 pane id를 알 수 없어 기록하지 않아요"),
+        None => log.write(t().log_side_no_pane),
     }
     let result = log
         .on_err(
-            "사이드 pane 시작",
+            t().log_side_start,
             prepare(paths, std::env::var("LINEAR_API_KEY").ok(), true),
         )
         .and_then(|(rt, app, effects)| runtime::run(rt, app, effects));
     if let Some((pane, workspace)) = &me {
-        let _ = log.on_err("사이드 pane 기록 지우기", panes.remove(workspace, pane));
+        let _ = log.on_err(t().log_side_record_remove, panes.remove(workspace, pane));
     }
     result
 }
@@ -94,7 +93,7 @@ fn prepare(
     }
     if !warnings.is_empty() {
         app.apply(
-            Msg::Warn(format!("설정 경고: {}", warnings.join(" · "))),
+            Msg::Warn((t().settings_warning)(&warnings.join(" · "))),
             now,
         );
     }

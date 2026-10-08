@@ -75,4 +75,77 @@ pub const EN: Texts = Texts {
     cache_recreate_failed: "Couldn't recreate the cache DB",
     cache_open_failed: "Couldn't open the cache DB",
     run_failed: |p| format!("Couldn't run {p}"),
+    tab_mine: "My issues",
+    tab_recent: "Recent",
+    tab_all: "All",
+    deep_limit: "Deep search allows 30 searches a minute. Try again shortly",
+    menu_actions: "Actions",
+    menu_copy_url: "Copy URL",
+    menu_copy_pr: |pr| format!("Copy PR link ({pr})"),
+    menu_copy_id: "Copy ID",
+    menu_open: "Open details",
+    menu_browser: "Open in browser",
+    menu_links: "Links and images",
+    menu_relations: "Related issues",
+    menu_deep_search: "Deep search on the server (includes comments)",
+    menu_refresh: "Refresh",
+    menu_back: "Back",
+    menu_close: "Close",
+    links_title: "Links and images",
+    links_none: "No links",
+    relations_title: "Relations",
+    relations_loading: "Loading relations…",
+    relations_failed: "Couldn't load relations",
+    relations_none: "No relations",
+    no_open_pr: |id| format!("{id} has no open PR"),
+    connected: |name, org| format!("Connected to {org} as {name}"),
+    key_expired_paste: "The API key has expired or lacks access. Paste a new key",
+    rate_limited_retry_in: |m| {
+        format!("Linear API rate limit reached. Try again in {}", minutes(m))
+    },
+    rate_limited_retry_later: "Linear API rate limit reached. Try again shortly",
+    throttled: |m| {
+        format!(
+            "API requests are running low. Pausing automatic server search for {}",
+            minutes(m)
+        )
+    },
+    key_invalid: "The key isn't valid. Check it in Linear",
+    key_offline: "Offline, so the key can't be checked",
+    key_save_failed: |e| format!("Couldn't save the key: {e}"),
+    only_web_links: "Only http(s) links can be opened",
+    opened_in_browser: "Opened in the browser",
+    browser_failed: |e| format!("Couldn't open the browser: {e}"),
+    copied: |what| format!("Copied: {what}"),
+    copy_failed: |e| format!("Couldn't copy: {e}"),
+    log_viewer: "viewer",
+    log_list: "list",
+    log_search: "search",
+    log_detail: "detail",
+    log_branch: "branch issue",
+    log_deep_limited: "deep search: rate limited",
+    log_cache_error: |e| format!("cache error: {e}"),
+    log_key_save_failed: |e| format!("key save failed: {e}"),
+    log_browser_failed: |e| format!("browser open failed: {e}"),
+    log_copy_failed: |e| format!("copy failed: {e}"),
+    log_exit: |e| format!("exit: {e}"),
+    log_panic: |info| format!("panic: {info}"),
+    log_palette_start: "palette start",
+    log_side_start: "side pane start",
+    log_side_started: |pane, workspace| {
+        format!("side pane start: pane {pane}, workspace {workspace}")
+    },
+    log_side_no_pane: "side pane start: own pane id unknown, not recorded",
+    log_side_record: "side pane record",
+    log_side_record_remove: "side pane record removal",
+    settings_warning: |w| format!("Settings warning: {w}"),
 };
+
+/// "1 minute", "5 minutes"
+fn minutes(n: i64) -> String {
+    if n == 1 {
+        "1 minute".to_string()
+    } else {
+        format!("{n} minutes")
+    }
+}

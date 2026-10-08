@@ -92,4 +92,73 @@ pub struct Texts {
     pub cache_open_failed: &'static str,
     /// 프로그램을 실행하지 못했다 (프로그램 이름·경로)
     pub run_failed: fn(&str) -> String,
+    // ── 앱 (`tui::app`) ──
+    pub tab_mine: &'static str,
+    pub tab_recent: &'static str,
+    pub tab_all: &'static str,
+    pub deep_limit: &'static str,
+    pub menu_actions: &'static str,
+    pub menu_copy_url: &'static str,
+    /// PR 이름 (`PR #12`)
+    pub menu_copy_pr: fn(&str) -> String,
+    pub menu_copy_id: &'static str,
+    pub menu_open: &'static str,
+    pub menu_browser: &'static str,
+    pub menu_links: &'static str,
+    pub menu_relations: &'static str,
+    pub menu_deep_search: &'static str,
+    pub menu_refresh: &'static str,
+    pub menu_back: &'static str,
+    pub menu_close: &'static str,
+    pub links_title: &'static str,
+    pub links_none: &'static str,
+    pub relations_title: &'static str,
+    pub relations_loading: &'static str,
+    pub relations_failed: &'static str,
+    pub relations_none: &'static str,
+    /// 이슈 식별자
+    pub no_open_pr: fn(&str) -> String,
+    /// (이름, 워크스페이스 이름)
+    pub connected: fn(&str, &str) -> String,
+    pub key_expired_paste: &'static str,
+    /// 다시 시도할 수 있을 때까지 남은 분
+    pub rate_limited_retry_in: fn(i64) -> String,
+    pub rate_limited_retry_later: &'static str,
+    /// 자동 서버 검색을 멈추는 분
+    pub throttled: fn(i64) -> String,
+    // ── 런타임 (`tui::runtime`) ──
+    pub key_invalid: &'static str,
+    pub key_offline: &'static str,
+    /// 오류 문구
+    pub key_save_failed: fn(&str) -> String,
+    pub only_web_links: &'static str,
+    pub opened_in_browser: &'static str,
+    /// 오류 문구
+    pub browser_failed: fn(&str) -> String,
+    /// 복사한 것 (`ENG-1 URL`)
+    pub copied: fn(&str) -> String,
+    /// 오류 문구
+    pub copy_failed: fn(&str) -> String,
+    // ── 로그 (`tui::runtime`, `tui`) ──
+    pub log_viewer: &'static str,
+    pub log_list: &'static str,
+    pub log_search: &'static str,
+    pub log_detail: &'static str,
+    pub log_branch: &'static str,
+    pub log_deep_limited: &'static str,
+    pub log_cache_error: fn(&str) -> String,
+    pub log_key_save_failed: fn(&str) -> String,
+    pub log_browser_failed: fn(&str) -> String,
+    pub log_copy_failed: fn(&str) -> String,
+    pub log_exit: fn(&str) -> String,
+    pub log_panic: fn(&str) -> String,
+    pub log_palette_start: &'static str,
+    pub log_side_start: &'static str,
+    /// (pane id, 워크스페이스 id)
+    pub log_side_started: fn(&str, &str) -> String,
+    pub log_side_no_pane: &'static str,
+    pub log_side_record: &'static str,
+    pub log_side_record_remove: &'static str,
+    /// 설정 경고들을 ` · `로 이은 것
+    pub settings_warning: fn(&str) -> String,
 }

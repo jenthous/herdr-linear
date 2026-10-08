@@ -3,6 +3,7 @@
 //! 런타임은 키를 [`Input`]으로 바꿔 [`App::handle`]에 넘기고, 네트워크·캐시 결과를
 //! [`Msg`]로 [`App::apply`]에 넘긴다. 앱은 해야 할 일을 [`Effect`]로 돌려준다.
 
+use crate::i18n::t;
 use crate::linear::client::ApiError;
 use crate::linear::types::{Comment, Issue, IssueRelations, Viewer};
 use crate::markdown::{self, Theme};
@@ -14,8 +15,6 @@ use crate::ui::relations::{self, RelRow};
 pub const SEARCH_DEBOUNCE_MS: i64 = 300;
 /// 하단 안내 문구를 보여주는 시간.
 pub const FLASH_MS: i64 = 3_000;
-/// 깊은 검색이 분당 한도에 걸렸을 때 안내.
-pub const DEEP_LIMIT_TEXT: &str = "깊은 검색은 분당 30회까지예요. 잠시 뒤 다시 시도하세요";
 /// 설정·범위 경고를 보여주는 시간. 일반 안내보다 길다.
 pub const WARN_MS: i64 = 10_000;
 /// 검색 결과로 보여줄 최대 줄 수.
@@ -32,10 +31,11 @@ impl Tab {
     pub const ALL: [Tab; 3] = [Tab::Mine, Tab::Recent, Tab::All];
 
     pub fn title(self) -> &'static str {
+        let t = t();
         match self {
-            Tab::Mine => "내 이슈",
-            Tab::Recent => "최근 본",
-            Tab::All => "전체",
+            Tab::Mine => t.tab_mine,
+            Tab::Recent => t.tab_recent,
+            Tab::All => t.tab_all,
         }
     }
 
@@ -727,37 +727,38 @@ impl App {
     }
 
     fn open_menu(&mut self) {
+        let t = t();
         let mut items: Vec<(String, Act)> = Vec::new();
         let has_issue = self.current_issue().is_some();
         // 가장 많이 쓰는 티켓 URL 복사를 맨 위에 둔다
         if let Some(issue) = self.current_issue() {
             let pr = issue.open_pr();
-            items.push(("URL 복사".into(), Act::CopyUrl));
+            items.push((t.menu_copy_url.into(), Act::CopyUrl));
             if let Some(pr) = pr {
-                items.push((format!("PR 링크 복사 ({})", pr.label()), Act::CopyPr));
+                items.push(((t.menu_copy_pr)(&pr.label()), Act::CopyPr));
             }
-            items.push(("ID 복사".into(), Act::CopyId));
+            items.push((t.menu_copy_id.into(), Act::CopyId));
         }
         if self.mode != Mode::Detail && has_issue {
-            items.push(("상세 보기".into(), Act::Open));
+            items.push((t.menu_open.into(), Act::Open));
         }
         if has_issue {
-            items.push(("브라우저에서 열기".into(), Act::Browser));
+            items.push((t.menu_browser.into(), Act::Browser));
         }
         if self.mode == Mode::Detail {
-            items.push(("링크·이미지 목록".into(), Act::Links));
-            items.push(("관계 이슈".into(), Act::Relations));
+            items.push((t.menu_links.into(), Act::Links));
+            items.push((t.menu_relations.into(), Act::Relations));
         }
         if self.mode != Mode::Detail && parse(&self.query).has_text() {
-            items.push(("서버에서 깊은 검색 (코멘트 포함)".into(), Act::DeepSearch));
+            items.push((t.menu_deep_search.into(), Act::DeepSearch));
         }
-        items.push(("새로고침".into(), Act::Refresh));
+        items.push((t.menu_refresh.into(), Act::Refresh));
         if self.mode == Mode::Detail {
-            items.push(("뒤로".into(), Act::Back));
+            items.push((t.menu_back.into(), Act::Back));
         }
-        items.push(("닫기".into(), Act::Quit));
+        items.push((t.menu_close.into(), Act::Quit));
         self.menu = Some(Menu {
-            title: "동작",
+            title: t.menu_actions,
             items,
             filter: String::new(),
             selected: 0,
@@ -791,9 +792,9 @@ impl App {
         }
         self.menu = Some(Menu {
             title: if items.is_empty() {
-                "링크 없음"
+                t().links_none
             } else {
-                "링크·이미지"
+                t().links_title
             },
             items,
             filter: String::new(),
@@ -819,10 +820,10 @@ impl App {
         let (known, loading) = (d.relations.is_some(), d.loading);
         let rows = self.detail_rows();
         let title = match (known, loading) {
-            (false, true) => "관계 불러오는 중…",
-            (false, false) => "관계를 불러오지 못했어요",
-            (true, _) if rows.is_empty() => "관계 없음",
-            (true, _) => "관계",
+            (false, true) => t().relations_loading,
+            (false, false) => t().relations_failed,
+            (true, _) if rows.is_empty() => t().relations_none,
+            (true, _) => t().relations_title,
         };
         self.menu = Some(Menu {
             title,
@@ -958,7 +959,7 @@ impl App {
                         what: pr.label(),
                     }],
                     None => {
-                        let text = format!("{}에 열린 PR이 없어요", issue.identifier);
+                        let text = (t().no_open_pr)(&issue.identifier);
                         self.set_flash(text, now);
                         Vec::new()
                     }
@@ -1204,10 +1205,7 @@ impl App {
                 self.rebuild(true);
             }
             Msg::KeyOk(v) => {
-                let greeting = format!(
-                    "{}님, {} 워크스페이스에 연결됐어요",
-                    v.name, v.organization.name
-                );
+                let greeting = (t().connected)(&v.name, &v.organization.name);
                 self.viewer = Some(v);
                 self.key_checking = false;
                 self.key_input.clear();
@@ -1228,8 +1226,7 @@ impl App {
                 self.env_key_invalid = env;
                 self.key_checking = false;
                 self.key_input.clear();
-                self.key_error = (!env)
-                    .then(|| "API 키가 만료됐거나 권한이 없어요. 새 키를 붙여넣으세요".into());
+                self.key_error = (!env).then(|| t().key_expired_paste.into());
             }
             Msg::Failed(e) => {
                 self.done_loading();
@@ -1245,12 +1242,9 @@ impl App {
                         let text = match reset_at_ms {
                             Some(reset) => {
                                 self.pause_until(reset);
-                                format!(
-                                    "Linear API 한도를 넘었어요. {}분 후 다시 시도하세요",
-                                    minutes_left(reset, now)
-                                )
+                                (t().rate_limited_retry_in)(minutes_left(reset, now))
                             }
-                            None => "Linear API 한도를 넘었어요. 잠시 뒤 다시 시도하세요".into(),
+                            None => t().rate_limited_retry_later.into(),
                         };
                         self.set_flash(text, now);
                     }
@@ -1260,17 +1254,11 @@ impl App {
             }
             Msg::Throttled(until) => {
                 self.pause_until(until);
-                self.set_flash(
-                    format!(
-                        "API 한도가 얼마 남지 않아 {}분 동안 자동 서버 검색을 멈춰요",
-                        minutes_left(until, now)
-                    ),
-                    now,
-                );
+                self.set_flash((t().throttled)(minutes_left(until, now)), now);
             }
             Msg::DeepLimited => {
                 self.done_loading();
-                self.set_flash(DEEP_LIMIT_TEXT, now);
+                self.set_flash(t().deep_limit, now);
             }
             Msg::Flash(text) => self.set_flash(text, now),
             Msg::Warn(text) => {
@@ -1294,6 +1282,7 @@ fn minutes_left(until: i64, now: i64) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::i18n::{Lang, t, with_lang};
     use crate::linear::types::RelatedIssue;
     use crate::test_support::IssueBuilder;
 
@@ -1963,7 +1952,7 @@ mod tests {
         );
         app.apply(Msg::DeepLimited, T0 + 2_000);
         assert_eq!(app.loading, 0);
-        assert_eq!(app.flash_text(T0 + 2_000), Some(DEEP_LIMIT_TEXT));
+        assert_eq!(app.flash_text(T0 + 2_000), Some(t().deep_limit));
         assert_eq!(app.updated_at, Some(T0), "갱신 시각을 바꾸지 않는다");
         assert_eq!(ids(&app), before, "로컬 결과를 그대로 둔다");
     }
@@ -2635,5 +2624,34 @@ mod tests {
         type_str(&mut app, "로", T0 + 179_900);
         assert!(app.tick(T0 + 180_000).is_empty());
         searched(&app.tick(T0 + 180_200), "로");
+    }
+
+    #[test]
+    fn tabs_menus_and_notices_follow_the_language() {
+        with_lang(Lang::En, || {
+            assert_eq!(Tab::Mine.title(), "My issues");
+            let mut app = started();
+            app.handle(Input::Menu, T0);
+            let menu = app.menu.as_ref().unwrap();
+            assert_eq!(menu.title, "Actions");
+            assert_eq!(menu.items[0].0, "Copy URL");
+            assert_eq!(menu.items.last().unwrap().0, "Close");
+            app.handle(Input::Esc, T0);
+            app.apply(
+                Msg::Failed(ApiError::RateLimited {
+                    reset_at_ms: Some(T0 + 90_000),
+                }),
+                T0,
+            );
+            assert_eq!(
+                app.flash_text(T0),
+                Some("Linear API rate limit reached. Try again in 2 minutes")
+            );
+            app.apply(Msg::Throttled(T0 + 60_000), T0);
+            assert_eq!(
+                app.flash_text(T0),
+                Some("API requests are running low. Pausing automatic server search for 1 minute")
+            );
+        });
     }
 }

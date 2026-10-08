@@ -23,6 +23,7 @@ use crate::cli::{
 };
 use crate::config::{self, ApiKey, KeySource, Paths, Settings};
 use crate::context::{Origin, current_branch, identifier_in_branch};
+use crate::i18n::{self, t};
 use crate::linear::client::{ApiError, LinearClient};
 use crate::linear::filter::{build_issue_filter, token_filter};
 use crate::linear::queries;
@@ -246,10 +247,10 @@ impl Runtime {
             }
             Done::Viewer(Err(ApiError::Auth)) => {
                 self.gate = None;
-                self.failed(ApiError::Auth, "내 정보")
+                self.failed(ApiError::Auth, t().log_viewer)
             }
             Done::Viewer(Err(e)) => {
-                self.log.write(&format!("내 정보: {e}"));
+                self.log.write(&format!("{}: {e}", t().log_viewer));
                 self.fail_gate(e)
             }
             Done::Page {
@@ -278,7 +279,7 @@ impl Runtime {
                     append,
                 }]
             }
-            Done::Page { result: Err(e), .. } => self.failed(e, "목록"),
+            Done::Page { result: Err(e), .. } => self.failed(e, t().log_list),
             Done::Search {
                 seq,
                 result: Ok(found),
@@ -295,10 +296,10 @@ impl Runtime {
                 // 깊은 검색에는 분당 30회 한도가 따로 있다. 응답의 리셋 시각은 시간당 요청 한도
                 // 기준이라 맞지 않으니, 자동 검색은 멈추지 않고 로컬 결과를 둔 채 안내만 한다.
                 // 서버 결과를 받은 게 아니라서 갱신 시각도 바꾸지 않는다
-                self.log.write("깊은 검색: 한도 초과");
+                self.log.write(t().log_deep_limited);
                 vec![Msg::DeepLimited]
             }
-            Done::Search { result: Err(e), .. } => self.failed(e, "검색"),
+            Done::Search { result: Err(e), .. } => self.failed(e, t().log_search),
             Done::Detail {
                 id,
                 result: Ok(Some(d)),
@@ -336,7 +337,7 @@ impl Runtime {
                 }
                 vec![Msg::DetailGone(id), Msg::Index(self.all_issues())]
             }
-            Done::Detail { result: Err(e), .. } => self.failed(e, "상세"),
+            Done::Detail { result: Err(e), .. } => self.failed(e, t().log_detail),
             Done::Branch(None) => vec![Msg::Pinned(None)],
             Done::Branch(Some((repo, branch))) => self.pin_branch(repo, branch, now),
             Done::Pinned {
@@ -352,16 +353,16 @@ impl Runtime {
             Done::Pinned {
                 result: Err(ApiError::Auth),
                 ..
-            } => self.failed(ApiError::Auth, "브랜치 이슈"),
+            } => self.failed(ApiError::Auth, t().log_branch),
             Done::Pinned { result: Err(e), .. } => {
                 // 세지 않은 요청이라 앱에는 알리지 않는다
-                self.log.write(&format!("브랜치 이슈: {e}"));
+                self.log.write(&format!("{}: {e}", t().log_branch));
                 Vec::new()
             }
             Done::Key { key, result: Ok(v) } => self.accept_key(key, v, now),
             Done::Key { result: Err(e), .. } => vec![Msg::KeyBad(match e {
-                ApiError::Auth => "키가 유효하지 않아요. Linear에서 키를 다시 확인하세요".into(),
-                ApiError::Offline(_) => "오프라인이라 키를 확인할 수 없어요".into(),
+                ApiError::Auth => t().key_invalid.into(),
+                ApiError::Offline(_) => t().key_offline.into(),
                 other => other.to_string(),
             })],
         };
@@ -379,17 +380,19 @@ impl Runtime {
         self.rx.recv_timeout(timeout).ok()
     }
 
+    /// 일을 새 스레드에서 돌린다. 지금 언어를 그 스레드에도 넘겨, 거기서 만든 문구(오류 등)가 같은 언어가 되게 한다.
     fn spawn(&mut self, job: impl FnOnce() -> Done + Send + 'static) {
         let tx = self.tx.clone();
+        let lang = i18n::lang();
         self.in_flight += 1;
         std::thread::spawn(move || {
-            let _ = tx.send(job());
+            let _ = tx.send(i18n::with_lang(lang, job));
         });
     }
 
     /// 캐시 오류는 기록만 하고 넘어간다 (캐시가 없어도 조회는 된다).
     fn note<T>(&self, r: Result<T>) -> Option<T> {
-        r.map_err(|e| self.log.write(&format!("캐시 오류: {e:#}")))
+        r.map_err(|e| self.log.write(&(t().log_cache_error)(&format!("{e:#}"))))
             .ok()
     }
 
@@ -612,8 +615,9 @@ impl Runtime {
     /// 검증된 키를 저장하고 이 키로 바꾼다.
     fn accept_key(&mut self, key: String, v: Viewer, now: i64) -> Vec<Msg> {
         if let Err(e) = config::save_api_key(&self.paths, &key) {
-            self.log.write(&format!("키 저장 실패: {e:#}"));
-            return vec![Msg::KeyBad(format!("키를 저장하지 못했어요: {e:#}"))];
+            self.log
+                .write(&(t().log_key_save_failed)(&format!("{e:#}")));
+            return vec![Msg::KeyBad((t().key_save_failed)(&format!("{e:#}")))];
         }
         let client = Arc::new((self.make_client)(key));
         self.note(save_viewer(&self.store, &v, now, &client.key_fingerprint()));
@@ -626,23 +630,23 @@ impl Runtime {
 
     fn open_url(&self, url: &str) -> Msg {
         if !is_web_url(url) {
-            return Msg::Flash("http(s) 링크만 열 수 있어요".into());
+            return Msg::Flash(t().only_web_links.into());
         }
         match self.system.open_url(url) {
-            Ok(()) => Msg::Flash("브라우저에서 열었어요".into()),
+            Ok(()) => Msg::Flash(t().opened_in_browser.into()),
             Err(e) => {
-                self.log.write(&format!("브라우저 열기 실패: {e:#}"));
-                Msg::Flash(format!("브라우저를 열지 못했어요: {e:#}"))
+                self.log.write(&(t().log_browser_failed)(&format!("{e:#}")));
+                Msg::Flash((t().browser_failed)(&format!("{e:#}")))
             }
         }
     }
 
     fn copy(&self, text: &str, what: &str) -> Msg {
         match self.system.copy(text) {
-            Ok(()) => Msg::Flash(format!("복사됨: {what}")),
+            Ok(()) => Msg::Flash((t().copied)(what)),
             Err(e) => {
-                self.log.write(&format!("복사 실패: {e:#}"));
-                Msg::Flash(format!("복사하지 못했어요: {e:#}"))
+                self.log.write(&(t().log_copy_failed)(&format!("{e:#}")));
+                Msg::Flash((t().copy_failed)(&format!("{e:#}")))
             }
         }
     }
@@ -733,7 +737,7 @@ pub fn run(mut rt: Runtime, mut app: App, effects: Vec<Effect>) -> Result<()> {
     let _ = execute!(stdout(), DisableMouseCapture, DisableBracketedPaste);
     ratatui::restore();
     if let Err(e) = &result {
-        rt.log.write(&format!("종료: {e:#}"));
+        rt.log.write(&(t().log_exit)(&format!("{e:#}")));
     }
     result
 }
@@ -814,7 +818,7 @@ fn log_panics(path: PathBuf) {
     std::panic::set_hook(Box::new(move |info| {
         // ratatui의 훅이 화면을 되돌린 뒤에 불린다. 마우스·붙여넣기 모드도 끈다
         let _ = execute!(stdout(), DisableMouseCapture, DisableBracketedPaste);
-        Logger::new(path.clone()).write(&format!("패닉: {info}"));
+        Logger::new(path.clone()).write(&(t().log_panic)(&info.to_string()));
         prev(info);
     }));
 }
@@ -822,6 +826,7 @@ fn log_panics(path: PathBuf) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::i18n::{Lang, with_lang};
     use crate::linear::types::{IssueRelations, RelatedIssue};
     use crate::test_support::IssueBuilder;
     use mockito::Matcher;
@@ -1558,5 +1563,21 @@ mod tests {
             should_draw(false, Some(T0), T0 + REDRAW_MS),
             "1초마다 한 번은 그린다"
         );
+    }
+
+    #[test]
+    fn spawned_work_keeps_the_callers_language() {
+        let mut fx = fixture(Some(KeySource::File), true, Origin::default());
+        with_lang(Lang::En, || {
+            fx.rt.spawn(|| {
+                Done::Viewer(Err(ApiError::Offline(crate::i18n::t().no_data.to_string())))
+            });
+        });
+        let Some(Done::Viewer(Err(ApiError::Offline(m)))) =
+            fx.rt.wait(std::time::Duration::from_secs(5))
+        else {
+            panic!("no offline viewer result");
+        };
+        assert_eq!(m, "No data in the response");
     }
 }
