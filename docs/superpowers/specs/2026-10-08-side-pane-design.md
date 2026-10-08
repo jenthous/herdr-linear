@@ -9,7 +9,7 @@
 
 ## 1. 목적
 
-팝업 대신 herdr pane에 Linear를 상시로 띄워 두고 본다. 화면은 지금 팝업 팔레트와 같고, 상시로 띄워 두는 데 필요한 것만 더한다.
+팝업 대신 herdr pane에 Linear를 상시로 띄워 두고 본다. 화면은 지금 팝업 팔레트와 같고, 상시로 띄워 두는 데 필요한 것만 더한다. 함께 목록 줄에 우선순위를 보여 준다(4장).
 
 ### 1.1 성공 기준
 
@@ -18,6 +18,7 @@
 3. `side.refresh_seconds`(기본 60초)마다 지금 보이는 것이 저절로 새로고침된다. 선택한 줄과 스크롤 위치는 그대로다.
 4. 가만히 있을 때 CPU를 거의 쓰지 않는다. 다시 그리기는 바뀐 게 있을 때와 1초에 한 번뿐이다.
 5. 팝업 팔레트는 지금처럼 따로 쓴다.
+6. 목록 줄(팝업·사이드 pane·CLI `mine`·`search`)에 우선순위가 Linear식 막대로 보인다.
 
 ### 1.2 범위 밖
 
@@ -77,7 +78,31 @@ description = "Linear 사이드 pane"
   - 사용자가 `r`을 누르면 다음 자동 새로고침은 그때부터 한 주기 뒤다.
 - 상세를 다시 받으면 지금 흐름대로 "최근 본" 시각도 바뀐다.
 
-## 4. 다시 그리기 (팝업·사이드 공통)
+## 4. 목록 우선순위 표시 (팝업·사이드·CLI 공통)
+
+지금 목록 줄에는 상태 아이콘·식별자·제목·라벨·담당자만 있고, 우선순위는 상세 머리에만 있다. 목록 줄의 식별자 뒤, 제목 앞에 Linear식 막대 칸(3칸)과 빈칸 하나를 둔다.
+
+```
+ ◐ ICT-664   ▂▄▆ CoP 자동계산 지원 범위…
+ ○ ICT-654    !  [에픽] 세인 장비자료 등록…
+ ◌ ICT-663   ▂▄▆ 연료 사용량 단위 지원 검토   (보통: ▆는 흐리게)
+ ○ ICT-655   ▂▄▆ 계측기 목록·교정성적서…     (낮음: ▄▆는 흐리게)
+ ○ ICT-659       사진대지 사진별 설명…       (없음: 빈칸)
+```
+
+| 우선순위 | 막대 칸(3칸) | 스타일 |
+|---|---|---|
+| 긴급(1) | ` ! ` | `!`는 빨강(`Color::Red`) 굵게 |
+| 높음(2) | `▂▄▆` | 기본 글자색 |
+| 보통(3) | `▂▄▆` | `▂▄`는 기본 글자색, `▆`는 `DIM` |
+| 낮음(4) | `▂▄▆` | `▂`는 기본 글자색, `▄▆`는 `DIM` |
+| 없음(0)·모르는 값 | 빈칸 3칸 | — |
+
+- 막대 칸은 늘 같은 폭이라서 제목이 줄마다 같은 자리에서 시작한다. 폭이 모자라면 지금처럼 라벨·담당자를 먼저 빼고, 그래도 넘치면 제목을 `…`로 줄인다. 막대 칸은 빼지 않는다.
+- CLI의 색을 끈 출력(`issue_line`)은 흐린 막대를 빈칸으로 쓴다(높음 `▂▄▆`, 보통 `▂▄ `, 낮음 `▂  `, 긴급 ` ! `, 없음 빈칸). 색을 켠 출력은 TUI와 같은 줄(`issue_row`)을 쓴다.
+- 관계 칸의 줄(`ui::relations`)에는 넣지 않는다. 관계 이슈는 우선순위를 받지 않는다.
+
+## 5. 다시 그리기 (팝업·사이드 공통)
 
 지금은 가만히 있어도 50ms마다 다시 그린다(2부 후속 N10). 이를 바꿔서 아래 경우에만 그린다.
 
@@ -87,9 +112,9 @@ description = "Linear 사이드 pane"
 
 입력을 기다리는 간격(50ms)은 그대로라서 반응 속도는 같다.
 
-## 5. herdr 연결
+## 6. herdr 연결
 
-### 5.1 매니페스트
+### 6.1 매니페스트
 
 ```toml
 [[actions]]
@@ -106,7 +131,7 @@ placement = "split"
 command = ["./target/release/herdr-linear", "ui", "--mode", "side"]
 ```
 
-### 5.2 열고 닫기 (`open side`)
+### 6.2 열고 닫기 (`open side`)
 
 1. **워크스페이스 id**: `HERDR_WORKSPACE_ID`를 쓴다. 없으면 컨텍스트의 `focused_pane_id`로 `herdr pane get`을 불러 `workspace_id`를 읽는다.
 2. **기록 찾기**: 상태 디렉터리의 `side-panes.json`(`{ "<workspace_id>": "<pane_id>" }`)에서 그 워크스페이스의 pane을 찾는다.
@@ -114,16 +139,16 @@ command = ["./target/release/herdr-linear", "ui", "--mode", "side"]
 4. **열기**: 기록이 없거나 그 pane이 이미 없으면(남은 기록은 지운다) 새로 연다. `herdr plugin pane open --plugin jh.linear --entrypoint side --placement split --direction right --focus`에 팝업과 같은 `--env`(원래 pane의 맥락)를 붙인다.
 5. **실패**: 팝업처럼 로그에 남기고 herdr 알림으로 알린다.
 
-### 5.3 사이드 프로세스 (`ui --mode side`)
+### 6.3 사이드 프로세스 (`ui --mode side`)
 
 - 팝업과 같은 준비를 한 뒤 앱을 사이드 모드로 시작한다. 준비는 설정·키·캐시·원래 pane 맥락을 읽는 것이다.
 - **기록**:
   - 시작할 때 자기 pane id와 워크스페이스 id를 `side-panes.json`에 적는다. pane id는 `HERDR_PANE_ID`, 없으면 `herdr pane current`로 얻는다. 워크스페이스 id는 `HERDR_WORKSPACE_ID`, 없으면 `herdr pane current`로 얻는다.
   - 정상 종료할 때는 자기 기록만 지운다.
-  - 비정상 종료로 남은 기록은 5.2의 3번에서 걸러진다.
+  - 비정상 종료로 남은 기록은 6.2의 3번에서 걸러진다.
 - **기록 파일 쓰기**: 쓸 때마다 통째로 다시 쓴다(임시 파일에 쓰고 이름 바꾸기). 읽지 못하거나 모양이 틀리면 빈 기록으로 본다. 두 프로세스가 동시에 쓰는 경우는 드물어서 잠금은 두지 않는다.
 
-### 5.4 구현 초기에 확인할 가정
+### 6.4 구현 초기에 확인할 가정
 
 아래는 실제 herdr에서 pane을 열어 봐야 알 수 있다. 사용자의 herdr 화면에 pane이 열리므로 사용자와 함께 확인한다.
 
@@ -135,26 +160,30 @@ command = ["./target/release/herdr-linear", "ui", "--mode", "side"]
 | 닫힌 pane에는 `herdr pane get`이 실패한다 | 닫은 뒤 불러 본다 | `herdr pane list`에서 찾는다 |
 | `herdr plugin pane close`가 사이드 pane을 닫는다 | 실제로 불러 본다 | `herdr pane close`를 쓴다 |
 
-## 6. 코드
+## 7. 코드
 
 | 파일 | 바뀌는 것 |
 |---|---|
-| `herdr-plugin.toml` | 5.1의 액션·pane |
-| `src/cli.rs` | `OpenTarget::Side`, `UiMode::Side`, 실행 분기 |
+| `herdr-plugin.toml` | 6.1의 액션·pane |
+| `src/ui/row.rs` | 목록 줄의 우선순위 막대 칸(4장) |
+| `src/ui/style.rs` | 우선순위 → 막대 칸 스팬(색 있는 줄과 색 없는 글자가 같은 규칙을 쓰게) |
+| `src/cli.rs` | `OpenTarget::Side`, `UiMode::Side`, 실행 분기, 색을 끈 목록 줄(`issue_line`)의 우선순위 칸 |
 | `src/herdr.rs` | `open_pane`에 배치(split·방향) 인자, `pane get`·`pane current`·`plugin pane close` 호출, `open side` 흐름 |
 | `src/side.rs` (새 파일) | `side-panes.json` 읽기·쓰기·지우기(워크스페이스 → pane) |
 | `src/tui/mod.rs` | `side(paths)` 진입점: 준비, 기록, 사이드 모드 앱, 종료 때 기록 지우기 |
 | `src/tui/app.rs` | 사이드 모드 표시, 목록 모드 Esc, `tick`의 자동 새로고침, `r`이 다음 자동 새로고침을 미룸 |
 | `src/tui/runtime.rs` | 다시 그릴지 판단하는 함수와 이벤트 루프 |
-| README·ROADMAP·바탕 스펙 | 8장 |
+| README·ROADMAP·바탕 스펙 | 9장 |
 
 설정 `[side] refresh_seconds`는 이미 읽고 검사한다(`Settings::side_refresh_seconds`).
 
-## 7. 테스트
+## 8. 테스트
 
 | 대상 | 내용 |
 |---|---|
 | `tui::app` | 아래 항목 |
+| `ui::row`·`ui::style` | 우선순위 다섯 단계의 막대 칸 글자와 색(긴급 빨강 굵게, 흐린 막대), 좁은 폭에서 라벨·담당자를 먼저 빼고 막대 칸은 남김, 바뀐 기존 줄 기대값 |
+| `cli` (목록) | 색을 끈 목록 줄의 우선순위 칸 글자 |
 | `side` | 기록·읽기·지우기, 다른 워크스페이스 기록 유지, 깨진 파일은 빈 기록, 자기 기록만 지우기 |
 | `herdr` | 가짜 herdr 스크립트로 확인한다.<br>• 기록 없음 → `plugin pane open` 인자(`--placement split --direction right --focus`, `--env`)<br>• 살아 있는 기록 → `plugin pane close` 후 기록 삭제<br>• 죽은 기록 → 기록 삭제 후 열기<br>• 워크스페이스 id를 `pane get`으로 얻기 |
 | `cli` | `open side`, `ui --mode side` 해석 (지금의 "`open side`는 오류" 테스트를 바꾼다) |
@@ -177,10 +206,11 @@ command = ["./target/release/herdr-linear", "ui", "--mode", "side"]
 - 가만히 둘 때 CPU가 거의 0%인지(활동 모니터나 `top`)
 - 팝업과 함께 쓰기
 
-## 8. 문서·버전
+## 9. 문서·버전
 
 - README(영어·한국어)
   - 사이드 pane 소개
+  - 목록의 우선순위 막대
   - 키 설정 예시 두 개
   - `[side] refresh_seconds` 설정
   - 문제 해결: 사이드 pane이 열리지 않거나 닫히지 않을 때
@@ -189,6 +219,7 @@ command = ["./target/release/herdr-linear", "ui", "--mode", "side"]
   - 남은 v0.2 항목(터미널에서 바로 바꾸기, 이슈를 에이전트에게 보내기, 리뷰에서 미룬 손질)은 v0.3 "변경 동작과 에이전트 전달 (다음)"으로 옮긴다.
 - 바탕 스펙: 이 문서대로 고친다.
   - 3.1 매니페스트, 3.3 `open side` 흐름
+  - 4.1 목록 줄의 우선순위 막대
   - 4.2 화면은 팝업과 같다
   - 4.7 사이드 모드의 Esc
   - 6.1 `side-panes.json`
