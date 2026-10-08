@@ -483,11 +483,21 @@ mod tests {
 
     #[test]
     fn more_children_line_fits_in_every_language() {
-        // 60칸 pane의 상세 글자 영역은 58칸이다. 그 줄은 칸 이름 폭만큼의 공백 + 안내라서 다 보여야 한다
+        // 60칸 pane의 상세 글자 영역은 58칸이다. 하위가 더 있을 때의 마지막 줄을 실제로 만들어서 다 보이는지 본다
+        let r = IssueRelations {
+            more_children: true,
+            ..IssueRelations::default()
+        };
         for lang in Lang::ALL {
             with_lang(lang, || {
-                let columns = kind_width() + t().more_children.width();
-                assert!(columns <= 58, "{lang:?}: {columns} columns");
+                let (out, _) = lines(None, Some(&r), 58);
+                let last = out.last().expect("more-children line");
+                assert_eq!(
+                    text(&out).last().map(|l| l.trim_start()),
+                    Some(t().more_children),
+                    "{lang:?}: the last line is the more-children note"
+                );
+                assert!(last.width() <= 58, "{lang:?}: {} columns", last.width());
             });
         }
     }
