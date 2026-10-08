@@ -44,6 +44,11 @@ impl SidePanes {
         self.write(&map)
     }
 
+    /// 모든 기록 (워크스페이스 id, pane id), 워크스페이스 순.
+    pub fn all(&self) -> Vec<(String, String)> {
+        self.read().into_iter().collect()
+    }
+
     /// 읽지 못하거나 모양이 틀리면 빈 기록.
     fn read(&self) -> BTreeMap<String, String> {
         fs::read_to_string(&self.path)
@@ -133,5 +138,21 @@ mod tests {
             .mode();
         assert_eq!(mode & 0o777, 0o600);
         assert!(!state.join("side-panes.json.tmp").exists());
+    }
+
+    #[test]
+    fn all_lists_every_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let panes = SidePanes::new(dir.path());
+        assert!(panes.all().is_empty());
+        panes.set("w2", "w2:p1").unwrap();
+        panes.set("w1", "w1:p3").unwrap();
+        assert_eq!(
+            panes.all(),
+            vec![
+                ("w1".to_string(), "w1:p3".to_string()),
+                ("w2".to_string(), "w2:p1".to_string()),
+            ]
+        );
     }
 }

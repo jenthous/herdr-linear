@@ -8,7 +8,7 @@ use clap::{Parser, Subcommand};
 
 use crate::config::{self, KeySource, Paths, Settings};
 use crate::context::{Origin, PluginContext};
-use crate::herdr::{Herdr, open_palette, toggle_side};
+use crate::herdr::{Herdr, close_side_panes, open_palette, toggle_side};
 use crate::linear::client::{ApiError, LinearClient};
 use crate::linear::filter::{build_issue_filter, token_filter};
 use crate::linear::queries;
@@ -165,6 +165,8 @@ pub fn run(cli: Cli) -> Result<String> {
                 &config::default_credential_fallbacks(),
                 &config::default_cache_fallbacks(),
             )?;
+            // 열린 사이드 pane은 메모리에 남은 키로 계속 새로고침하니 함께 닫는다
+            close_side_panes(&Herdr::from_env(), &SidePanes::new(&paths.state_dir));
             // herdr 액션으로 실행되면 출력이 보이지 않으니 알림으로 알린다
             if std::env::var_os("HERDR_PLUGIN_ACTION_ID").is_some() {
                 let _ = Herdr::from_env().notify("Linear", &out);

@@ -113,7 +113,9 @@ fn paint_hover(f: &mut Frame, app: &App, hits: &[Hit]) {
     let paint = match (target, &app.menu) {
         (Target::MenuItem(i), Some(menu)) => i != menu.selected,
         (Target::Row(i), None) => i != app.selected,
-        (Target::Tab(_) | Target::Relation(_), None) => true,
+        // 탭은 누르면 탭이 바뀌는 곳만: 상세 화면이 아니고 지금 탭이 아닐 때
+        (Target::Tab(tab), None) => app.mode != Mode::Detail && tab != app.tab,
+        (Target::Relation(_), None) => true,
         _ => false,
     };
     if !paint {
@@ -1457,6 +1459,20 @@ mod tests {
                 .content()
                 .iter()
                 .all(|c| c.bg != HOVER)
+        );
+    }
+
+    #[test]
+    fn tabs_light_up_only_where_a_click_switches() {
+        let mut a = app();
+        a.handle(Input::Hover(Some(Target::Tab(Tab::Mine))), T0);
+        assert_eq!(bg_of(&a, Target::Tab(Tab::Mine)), Color::Reset, "지금 탭");
+        let mut d = related_detail("본문");
+        d.handle(Input::Hover(Some(Target::Tab(Tab::Recent))), T0);
+        assert_eq!(
+            bg_of(&d, Target::Tab(Tab::Recent)),
+            Color::Reset,
+            "상세에서는 탭을 눌러도 바뀌지 않는다"
         );
     }
 }

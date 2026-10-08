@@ -285,6 +285,8 @@ struct TabData {
     loaded: bool,
     has_more: bool,
     loading_more: bool,
+    /// 다음 페이지를 이어 붙였다. 자동 새로고침이 첫 페이지로 되돌리지 않게 한다
+    paged: bool,
 }
 
 pub struct App {
@@ -328,6 +330,8 @@ pub struct App {
     results: Option<Vec<Issue>>,
     search_seq: u64,
     search_due: Option<i64>,
+    /// 지금 보이는 서버 결과가 깊은 검색(코멘트 포함) 결과다. 새로고침도 깊은 검색으로 한다
+    deep_results: bool,
     /// 한도 초과로 자동 요청을 멈출 시각
     paused_until: Option<i64>,
 }
@@ -365,6 +369,7 @@ impl App {
             results: None,
             search_seq: 0,
             search_due: None,
+            deep_results: false,
             paused_until: None,
         }
     }
@@ -521,6 +526,7 @@ impl App {
         // 이전 검색어로 보낸 요청의 응답은 이제 버린다 (새 요청이 아직 안 나갔어도)
         self.search_seq += 1;
         self.results = None;
+        self.deep_results = false;
         self.rebuild(false);
         self.search_due = (!parse(&self.query).is_empty()).then_some(now + SEARCH_DEBOUNCE_MS);
     }
@@ -971,6 +977,7 @@ impl App {
                 }
                 self.search_seq += 1;
                 self.search_due = None;
+                self.deep_results = true;
                 self.loading += 1;
                 vec![Effect::DeepSearch {
                     seq: self.search_seq,
@@ -1017,6 +1024,10 @@ impl App {
             return Vec::new();
         }
         if !parse(&self.query).is_empty() {
+            // 깊은 검색 결과를 보고 있으면 깊은 검색을 다시 한다 (보통 검색이 결과를 덮지 않게)
+            if self.deep_results {
+                return self.act(Act::DeepSearch, now);
+            }
             self.search_due = Some(now);
             self.paused_until = None;
             return Vec::new();
@@ -1033,7 +1044,8 @@ impl App {
     }
 
     /// 주기가 되면 `r`과 같이 새로고침한다. 앞 요청을 기다리는 중이거나, 한도로 자동 요청을
-    /// 멈췄거나, 키 입력 화면이면 이번 회차는 건너뛰고 다음 주기에 다시 본다.
+    /// 멈췄거나, 키 입력 화면이거나, 메뉴가 열려 있거나, 입력 중인 검색어의 서버 검색이 곧
+    /// 나가면 이번 회차는 건너뛰고 다음 주기에 다시 본다.
     fn auto_refresh(&mut self, now: i64) -> Vec<Effect> {
         let Some(every) = self.refresh_every else {
             return Vec::new();
@@ -1044,8 +1056,21 @@ impl App {
         }
         self.refresh_due = Some(now + every);
         let paused = self.paused_until.is_some_and(|until| now < until);
-        if self.mode == Mode::Onboarding || self.loading > 0 || paused {
+        // 메뉴가 열려 있으면 메뉴가 고른 이슈가 바뀌지 않게, 검색어를 입력하는 중이면 곧 나갈 검색에 맡긴다
+        if self.mode == Mode::Onboarding
+            || self.loading > 0
+            || paused
+            || self.menu.is_some()
+            || self.search_due.is_some()
+        {
             return Vec::new();
+        }
+        // 다음 페이지까지 이어 본 목록은 첫 페이지로 되돌리지 않고 현재 브랜치 이슈만 다시 찾는다
+        if self.mode != Mode::Detail
+            && parse(&self.query).is_empty()
+            && self.tabs[self.tab.index()].paged
+        {
+            return vec![Effect::ResolvePinned];
         }
         self.refresh(now)
     }
@@ -1098,6 +1123,7 @@ impl App {
                 } else {
                     data.issues = issues;
                 }
+                data.paged = append;
                 data.has_more = has_more;
                 if fresh {
                     self.done_loading();
@@ -2488,5 +2514,126 @@ mod tests {
             T0 + 2_000,
         );
         assert_eq!(app.tick(T0 + 60_000), tab_and_pinned(Tab::Mine));
+    }
+
+    #[test]
+    fn auto_refresh_keeps_a_paged_list_but_r_reloads_it() {
+        let mut app = started().into_side(60);
+        assert!(app.tick(T0).is_empty());
+        app.apply(
+            Msg::Tab {
+                tab: Tab::Mine,
+                issues: vec![issue("c", "ENG-3", "다음 페이지")],
+                fresh: true,
+                has_more: false,
+                append: true,
+            },
+            T0 + 1_000,
+        );
+        app.handle(Input::Bottom, T0 + 1_000);
+        assert_eq!(app.selected, 2);
+        // 다음 페이지까지 본 목록은 첫 페이지로 되돌리지 않고 현재 브랜치 이슈만 다시 찾는다
+        assert_eq!(app.tick(T0 + 60_000), vec![Effect::ResolvePinned]);
+        assert_eq!(app.loading, 0);
+        assert_eq!(app.selected, 2, "고른 줄은 그대로");
+        // r은 지금처럼 처음부터 다시 받는다
+        app.handle(Input::Esc, T0 + 61_000);
+        assert_eq!(
+            app.handle(Input::Act(Act::Refresh), T0 + 61_000),
+            tab_and_pinned(Tab::Mine)
+        );
+        app.apply(
+            tab_msg(Tab::Mine, vec![issue("a", "ENG-1", "로그인 버그")], true),
+            T0 + 62_000,
+        );
+        assert_eq!(
+            app.tick(T0 + 121_000),
+            tab_and_pinned(Tab::Mine),
+            "첫 페이지만 있으면 평소대로"
+        );
+    }
+
+    #[test]
+    fn refresh_repeats_a_deep_search() {
+        let deep = |effects: &[Effect]| match effects {
+            [Effect::DeepSearch { seq, query }] if query == "로그인" => *seq,
+            other => panic!("'로그인' 깊은 검색 하나가 아님: {other:?}"),
+        };
+        let mut app = started().into_side(60);
+        assert!(app.tick(T0).is_empty());
+        type_str(&mut app, "로그인", T0);
+        let seq = searched(&app.tick(T0 + SEARCH_DEBOUNCE_MS), "로그인");
+        app.apply(
+            Msg::Search {
+                seq,
+                issues: Vec::new(),
+            },
+            T0 + 1_000,
+        );
+        // 목록 맨 아래 "서버에서 검색 (코멘트 포함)"을 고른다
+        app.handle(Input::Bottom, T0 + 2_000);
+        let first = deep(&app.handle(Input::Enter, T0 + 2_000));
+        let found = || vec![issue("z", "ENG-99", "코멘트에만 있는 말")];
+        app.apply(
+            Msg::Search {
+                seq: first,
+                issues: found(),
+            },
+            T0 + 3_000,
+        );
+        // 자동 새로고침은 깊은 검색을 다시 한다
+        let again = deep(&app.tick(T0 + 60_000));
+        assert_ne!(again, first);
+        app.apply(
+            Msg::Search {
+                seq: again,
+                issues: found(),
+            },
+            T0 + 61_000,
+        );
+        // r도 같다
+        app.handle(Input::Esc, T0 + 62_000);
+        let manual = deep(&app.handle(Input::Act(Act::Refresh), T0 + 62_000));
+        app.apply(
+            Msg::Search {
+                seq: manual,
+                issues: found(),
+            },
+            T0 + 63_000,
+        );
+        // 검색어를 바꾸면 다시 보통 검색이다
+        app.handle(Input::Search, T0 + 64_000);
+        type_str(&mut app, " 버튼", T0 + 64_000);
+        let typed = searched(&app.tick(T0 + 64_000 + SEARCH_DEBOUNCE_MS), "로그인 버튼");
+        app.apply(
+            Msg::Search {
+                seq: typed,
+                issues: Vec::new(),
+            },
+            T0 + 65_000,
+        );
+        searched(&app.tick(T0 + 122_000), "로그인 버튼");
+    }
+
+    #[test]
+    fn auto_refresh_waits_while_a_menu_is_open_or_a_search_is_pending() {
+        let mut app = started().into_side(60);
+        assert!(app.tick(T0).is_empty());
+        app.handle(Input::Menu, T0 + 1_000);
+        assert!(
+            app.tick(T0 + 60_000).is_empty(),
+            "메뉴가 고른 이슈가 바뀌지 않게"
+        );
+        app.handle(Input::Esc, T0 + 61_000);
+        assert!(app.menu.is_none());
+        assert_eq!(app.tick(T0 + 120_000), tab_and_pinned(Tab::Mine));
+        app.apply(
+            tab_msg(Tab::Mine, vec![issue("a", "ENG-1", "로그인 버그")], true),
+            T0 + 121_000,
+        );
+        // 검색어를 입력하는 중이면 곧 나갈 검색에 맡긴다
+        type_str(&mut app, "로", T0 + 179_900);
+        assert!(app.tick(T0 + 180_000).is_empty());
+        searched(&app.tick(T0 + 180_200), "로");
     }
 }

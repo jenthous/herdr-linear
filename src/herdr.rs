@@ -207,6 +207,17 @@ fn switch_side(
     herdr.open_side_pane(&Origin::from_context(ctx).to_env())
 }
 
+/// 로그아웃: 기록된 사이드 pane 중 우리 사이드 화면이 도는 것만 닫고 기록을 지운다.
+/// 열린 사이드 pane이 메모리에 남은 키로 계속 새로고침하지 않게 한다. 닫지 못한 pane의 기록은 남긴다.
+pub fn close_side_panes(herdr: &Herdr, panes: &SidePanes) {
+    for (workspace, pane) in panes.all() {
+        if herdr.runs_side_ui(&pane) && herdr.close_plugin_pane(&pane).is_err() {
+            continue;
+        }
+        let _ = panes.remove(&workspace, &pane);
+    }
+}
+
 /// `…/herdr-linear ui --mode side`인지.
 fn is_side_ui(argv: &[&str]) -> bool {
     let bin = argv
@@ -412,8 +423,13 @@ mod tests {
 
     #[test]
     fn side_never_closes_a_pane_running_something_else() {
-        // id가 셸 pane에 다시 쓰였거나, 그 pane이 이미 닫혔다
-        for (reply, code) in [(SHELL_PROCESS, 0), (PANE_NOT_FOUND, 1)] {
+        // id가 셸 pane에 다시 쓰였거나, 그 pane이 이미 닫혔거나, herdr 답을 읽을 수 없다
+        for (reply, code) in [
+            (SHELL_PROCESS, 0),
+            (PANE_NOT_FOUND, 1),
+            ("not json", 0),
+            ("", 0),
+        ] {
             let s = side(&[("pane process-info --pane w1:p5", reply, code)]);
             s.panes.set("w1", "w1:p5").unwrap();
             toggle_side(&s.herdr, &s.panes, Some("w1".into()), &focused(), &s.log).unwrap();
@@ -521,5 +537,41 @@ mod tests {
         );
         assert!(!is_side_ui(&["/usr/bin/vim", "ui", "--mode", "side"]));
         assert!(!is_side_ui(&[]));
+    }
+
+    #[test]
+    fn logout_closes_only_our_side_panes() {
+        let s = side(&[
+            ("pane process-info --pane w1:p5", SIDE_PROCESS, 0),
+            ("pane process-info --pane w2:p1", SHELL_PROCESS, 0),
+        ]);
+        s.panes.set("w1", "w1:p5").unwrap();
+        s.panes.set("w2", "w2:p1").unwrap();
+        close_side_panes(&s.herdr, &s.panes);
+        let calls = calls(s.dir.path());
+        assert!(
+            calls
+                .iter()
+                .any(|c| *c == ["plugin", "pane", "close", "w1:p5"]),
+            "{calls:?}"
+        );
+        assert!(
+            !calls
+                .iter()
+                .any(|c| c.iter().any(|a| a == "close") && c.iter().any(|a| a == "w2:p1")),
+            "셸 pane은 닫지 않는다: {calls:?}"
+        );
+        assert!(s.panes.all().is_empty(), "남은 기록도 지운다");
+    }
+
+    #[test]
+    fn logout_keeps_the_record_when_close_fails() {
+        let s = side(&[
+            ("pane process-info --pane w1:p5", SIDE_PROCESS, 0),
+            ("plugin pane close w1:p5", "error: ui_busy", 1),
+        ]);
+        s.panes.set("w1", "w1:p5").unwrap();
+        close_side_panes(&s.herdr, &s.panes);
+        assert_eq!(s.panes.get("w1").as_deref(), Some("w1:p5"));
     }
 }

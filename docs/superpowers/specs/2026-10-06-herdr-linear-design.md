@@ -142,7 +142,7 @@ description = "Linear 사이드 패널"
   - 닫지 않았으면 `herdr plugin pane open --plugin jh.linear --entrypoint side --placement split --direction right --focus`에 팔레트와 같은 `--env`를 붙여 연다.
   - 사이드 패널 프로세스는 시작할 때 자기 pane id(`HERDR_PANE_ID`, 없으면 `herdr pane current`)를 이 파일에 기록하고, 정상 종료할 때 자기 기록만 지운다.
 - **`open url`**: 컨텍스트의 `clicked_url`에서 식별자를 뽑아 `HERDR_LINEAR_OPEN`으로 팔레트를 연다.
-- **`logout`**: `credentials`와 `cache.db`를 지우고 `herdr notification show`로 결과를 알린다.
+- **`logout`**: `credentials`와 `cache.db`를 지우고, 기록된 사이드 패널 중 우리 화면이 도는 것을 닫고, `herdr notification show`로 결과를 알린다.
 - popup 열기가 `ui_busy`로 거절되면 `herdr notification show`로 알린다. 설정 화면, 복사 모드, 다른 모달이 떠 있을 때 이렇게 된다.
 
 ### 3.4 현재 맥락 활용
@@ -188,8 +188,8 @@ Linear   [내 이슈]  최근 본  전체                              2분 전 
 오른쪽 split이고, 화면은 팔레트와 같다. 검색 모드로 시작하고, 넓으면 목록·미리보기를 가로로 놓고, 상세에는 관계 칸이 있다. 자세한 것은 `docs/superpowers/specs/2026-10-08-side-pane-design.md`.
 
 - 목록 모드에서 Esc로 닫히지 않는다. `q`·Ctrl+C나 열고 닫는 키로 닫는다.
-- 지금 보이는 것을 `side.refresh_seconds`(기본 60초)마다 다시 불러온다. 상세는 그 상세, 검색어가 있으면 서버 검색, 그 밖에는 지금 탭과 현재 브랜치 이슈다. 0이면 자동 새로고침을 끈다.
-- 앞 요청을 기다리는 중이거나, 한도로 자동 요청을 멈췄거나, 키 입력 화면이면 그 회차를 건너뛴다. `r`을 누르면 다음 자동 새로고침은 그때부터 한 주기 뒤다.
+- 지금 보이는 것을 `side.refresh_seconds`(기본 60초)마다 다시 불러온다. 상세는 그 상세, 검색어가 있으면 서버 검색, 그 밖에는 지금 탭과 현재 브랜치 이슈다. 0이면 자동 새로고침을 끈다. 깊은 검색 결과는 깊은 검색으로 다시 찾고, 다음 페이지까지 이어 본 목록은 현재 브랜치 이슈만 다시 찾는다.
+- 앞 요청을 기다리는 중이거나, 한도로 자동 요청을 멈췄거나, 키 입력 화면이거나, 메뉴가 열려 있거나, 입력 중인 검색어의 서버 검색이 곧 나가면 그 회차를 건너뛴다. `r`을 누르면 다음 자동 새로고침은 그때부터 한 주기 뒤다.
 
 ### 4.3 상단 상태 표시
 
