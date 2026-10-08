@@ -573,7 +573,7 @@ if [ "$cargo_version" != "$want" ] || [ "$plugin_version" != "$want" ]; then
   echo "release tag $tag does not match Cargo.toml ($cargo_version) and herdr-plugin.toml ($plugin_version)" >&2
   exit 1
 fi
-echo "release tag $tag matches Cargo.toml and herdr-plugin.toml"
+echo "release tag $tag matches Cargo.toml, herdr-plugin.toml and Cargo.lock"
 ```
 
 `.github/workflows/release.yml`을 만든다.
@@ -645,7 +645,7 @@ Run: `cargo test --test release_version`
 Expected: 2개 통과.
 
 Run: `bash scripts/check-release-version.sh v0.2.0; echo "exit=$?"`
-Expected: `release tag v0.2.0 matches Cargo.toml and herdr-plugin.toml`, `exit=0` (아직 0.2.0이다).
+Expected: `release tag v0.2.0 matches Cargo.toml, herdr-plugin.toml and Cargo.lock`, `exit=0` (아직 0.2.0이다).
 
 Run: `python3 -c 'import yaml; d = yaml.safe_load(open(".github/workflows/release.yml")); print(sorted(d["jobs"]), [m["target"] for m in d["jobs"]["upload-assets"]["strategy"]["matrix"]["include"]])'`
 Expected: `['check-version', 'create-release', 'upload-assets'] ['aarch64-apple-darwin', 'x86_64-apple-darwin', 'x86_64-unknown-linux-musl', 'aarch64-unknown-linux-musl']`
@@ -698,7 +698,7 @@ C1이 성공한 뒤 `main`에서 새 브랜치 `release/v0.2.1`을 만들어 한
 `Cargo.toml`에서 `version = "0.2.0"` → `version = "0.2.1"`. `herdr-plugin.toml`에서 `version = "0.2.0"` → `version = "0.2.1"`.
 
 Run: `cargo test`
-Expected: 모두 통과. `Cargo.lock`의 herdr-linear 버전도 0.2.1로 바뀐다(`git diff --stat Cargo.lock`은 한 줄). `release_version`의 `cargo_and_plugin_versions_match_the_release_tag`가 두 파일이 같이 올라갔는지 확인한다.
+Expected: 모두 통과. `Cargo.lock`의 herdr-linear 버전도 0.2.1로 바뀐다(`git diff --stat Cargo.lock`은 한 줄). `release_version`의 `cargo_and_plugin_versions_match_the_release_tag`가 `Cargo.toml`·`herdr-plugin.toml`·`Cargo.lock`이 같이 올라갔는지 확인한다.
 
 - [ ] **Step 2: README 영어 부분을 고친다**
 
@@ -814,7 +814,7 @@ command = ["bash", "scripts/install.sh"]
 - [ ] **Step 5: 확인하고 커밋한다**
 
 Run: `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && bash scripts/check-release-version.sh v0.2.1`
-Expected: 모두 통과하고 마지막 줄이 `release tag v0.2.1 matches Cargo.toml and herdr-plugin.toml`.
+Expected: 모두 통과하고 마지막 줄이 `release tag v0.2.1 matches Cargo.toml, herdr-plugin.toml and Cargo.lock`.
 
 ```bash
 git add Cargo.toml Cargo.lock herdr-plugin.toml README.md docs/superpowers/specs/2026-10-06-herdr-linear-design.md
