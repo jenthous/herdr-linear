@@ -33,7 +33,7 @@
 
 ## ✅ v0.2 — side pane
 
-- **Side pane**: a second key (`prefix+shift+i`) opens the palette screen in a pane to the right of your work and closes it again. It stays open, refreshes what you're looking at every 60 seconds by default, and only `q` or the key closes it.
+- **Side pane**: a second key (`prefix+shift+i`) opens the palette screen in a pane to the right of your work and closes it again. It stays open, refreshes what you're looking at every 60 seconds by default, and Esc doesn't close it from the list; `q`, Ctrl+C, or the key does.
 - List rows show Linear-style priority bars in the palette, the side pane, and the CLI.
 - Whatever you can click lights up under the mouse pointer.
 - The screen is redrawn only when something changes, and otherwise once a second, so an idle pane uses almost no CPU.
@@ -103,7 +103,7 @@
 
 ## ✅ v0.2 — 사이드 pane
 
-- **사이드 pane**: 키 하나(`prefix+shift+i`)를 더 두면 팔레트 화면을 작업 오른쪽 pane에 열고 닫아요. 상시로 띄워 두고, 보고 있는 것을 스스로 새로 받아요(기본 60초마다). `q`나 그 키로만 닫혀요.
+- **사이드 pane**: 키 하나(`prefix+shift+i`)를 더 두면 팔레트 화면을 작업 오른쪽 pane에 열고 닫아요. 상시로 띄워 두고, 보고 있는 것을 스스로 새로 받아요(기본 60초마다). 목록 모드에서 Esc로는 닫히지 않고, `q`·Ctrl+C나 그 키로 닫혀요.
 - 목록 줄에 Linear식 우선순위 막대를 보여 줘요. 팔레트, 사이드 pane, CLI 모두 같아요.
 - 누를 수 있는 곳에 마우스를 올리면 옅게 밝아져요.
 - 바뀐 게 있을 때와 1초에 한 번만 다시 그려서, 가만히 둔 pane은 CPU를 거의 쓰지 않아요.
