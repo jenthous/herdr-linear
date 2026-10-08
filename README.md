@@ -10,7 +10,7 @@
 
 - **Tabs**: your open issues · recently viewed · all issues in your teams, drawn with Linear's own state and label colors.
 - **Side pane**: a second key opens the same screen in a pane to the right of your work, and closes it again. It stays open and refreshes what you're looking at every 60 seconds by default. In list mode, Esc doesn't close it; `q` does.
-- **Priority**: list rows show a one-column priority mark after the issue ID: `▆` high, `▄` medium, `▂` low, and a red `!` for urgent.
+- **Priority**: a one-column gauge after the issue ID fills up with priority: orange `▆` high, yellow `▄` medium, gray `▂` low, and a red `!` for urgent.
 - **Search as you type**: cached issues are searched instantly. When you pause for 300 ms the server is searched too and the results are merged. Pick "서버에서 검색 (코멘트 포함)" at the bottom of the list to search comments as well.
 - **Issue detail**: markdown body (headings, lists, code blocks, tables), comments, and a list of links. An open PR is shown at the top.
 - **Relations**: the detail view lists the parent, sub-issues, blocked by, blocking, and related issues in Linear's state colors. Press `t` for the relations menu or click a line to open an issue, and Esc to come back.
@@ -152,7 +152,7 @@ scripts/deploy-local.sh   # build and link a stable copy for daily use on this m
 
 - **탭**: 내 이슈 · 최근 본 · 전체. 상태와 라벨은 Linear에 설정된 색으로 보여요.
 - **사이드 pane**: 키를 하나 더 두면 같은 화면을 작업 오른쪽 pane에 열고 닫아요. 상시로 띄워 두고, 보고 있는 것을 기본 60초마다 새로 받아요. 목록 모드에서는 Esc로 닫히지 않고 `q`로 닫아요.
-- **우선순위**: 목록 줄의 식별자 뒤에 우선순위를 한 칸으로 보여 줘요. `▆` 높음, `▄` 보통, `▂` 낮음, 긴급은 빨간 `!`예요.
+- **우선순위**: 목록 줄의 식별자 뒤 한 칸에서 우선순위만큼 막대가 차올라요. 주황 `▆` 높음, 노랑 `▄` 보통, 회색 `▂` 낮음, 긴급은 빨간 `!`예요.
 - **입력하는 대로 검색**: 캐시에서 바로 찾아요. 입력이 0.3초 멈추면 서버에서도 찾아 합쳐요. 목록 맨 아래 "서버에서 검색 (코멘트 포함)"을 고르면 코멘트까지 찾아요.
 - **상세**: markdown 본문(제목, 목록, 코드 블록, 표), 코멘트, 링크 목록을 보여 줘요. 열린 PR은 맨 위에 보여요.
 - **관계**: 상세에 상위·하위·막힘·막는 중·관련 이슈를 Linear 상태 색으로 보여 줘요. `t`로 관계 메뉴를 열거나 줄을 클릭하면 그 이슈로 가고, Esc로 돌아와요.
