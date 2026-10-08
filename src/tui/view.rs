@@ -1484,22 +1484,32 @@ mod tests {
         }
     }
 
+    /// 첫째(ENG-1)는 머리에 보일 수 있는 것을 다 갖췄고, 둘째(ENG-2)는 담당자·PR·본문이 없다.
     fn latin_issues() -> Vec<Issue> {
+        let mut first = IssueBuilder::new("a", "ENG-1", "Login bug")
+            .state("In Progress", "started")
+            .priority(2)
+            .assignee("me", "alex")
+            .labels(&["bug"])
+            .parent("p", "ENG-9", "Auth revamp", "started")
+            .pr(
+                "https://github.com/acme/web/pull/7",
+                "open",
+                7,
+                "2026-10-01T00:00:00.000Z",
+            )
+            .description(
+                "## Steps\n- Sign in\n\n![diagram](https://x.dev/a.png) [log](https://x.dev/log)",
+            )
+            .json();
+        // 빌더에 없는 것은 JSON으로 더한다: 프로젝트·사이클·예상·마감, 그리고 PR을 초안으로
+        first["project"] = serde_json::json!({ "id": "pj1", "name": "Onboarding" });
+        first["cycle"] = serde_json::json!({ "id": "cy1", "number": 12.0, "name": "Sprint 12" });
+        first["estimate"] = serde_json::json!(3.0);
+        first["dueDate"] = serde_json::json!("2026-10-31");
+        first["attachments"]["nodes"][0]["metadata"]["draft"] = serde_json::json!(true);
         vec![
-            IssueBuilder::new("a", "ENG-1", "Login bug")
-                .state("In Progress", "started")
-                .priority(2)
-                .assignee("me", "alex")
-                .labels(&["bug"])
-                .parent("p", "ENG-9", "Auth revamp", "started")
-                .pr(
-                    "https://github.com/acme/web/pull/7",
-                    "open",
-                    7,
-                    "2026-10-01T00:00:00.000Z",
-                )
-                .description("## Steps\n- Sign in\n\n![diagram](https://x.dev/a.png) [log](https://x.dev/log)")
-                .build(),
+            serde_json::from_value::<Issue>(first).unwrap(),
             IssueBuilder::new("b", "ENG-2", "Checkout page").build(),
         ]
     }
@@ -1553,12 +1563,18 @@ mod tests {
             );
             a
         };
-        let detailed = || {
+        // 목록의 `index`번째 줄(0은 현재 브랜치 이슈, 1은 둘째 이슈)을 열고 서버 응답까지 받은 상세
+        let detailed = |index: usize| {
             let mut a = listed();
+            for _ in 0..index {
+                a.handle(Input::Down, T0);
+            }
             a.handle(Input::Enter, T0);
-            a.apply(latin_detail(&latin_issues()[0]), T0);
+            a.apply(latin_detail(&latin_issues()[index]), T0);
             a
         };
+        // 식별자만 알고 연 상세 (캐시에 없는 이슈)
+        let by_id = || App::start(Some("ENG-9".into())).0;
         let mut searching = listed();
         for c in "login".chars() {
             searching.handle(Input::Char(c), T0);
@@ -1572,11 +1588,17 @@ mod tests {
         let mut gone = listed();
         gone.handle(Input::Enter, T0);
         gone.apply(Msg::DetailGone(latin_issues()[0].id.clone()), T0);
-        let mut detail_menu = detailed();
+        let mut second_row = listed();
+        second_row.handle(Input::Down, T0);
+        let mut by_id_failed = by_id();
+        by_id_failed.apply(Msg::Failed(ApiError::Offline("timeout".into())), T0);
+        let mut by_id_gone = by_id();
+        by_id_gone.apply(Msg::DetailGone("ENG-9".into()), T0);
+        let mut detail_menu = detailed(0);
         detail_menu.handle(Input::Menu, T0);
-        let mut links = detailed();
+        let mut links = detailed(0);
         links.handle(Input::Act(Act::Links), T0);
-        let mut relations = detailed();
+        let mut relations = detailed(0);
         relations.handle(Input::Act(Act::Relations), T0);
         let mut offline = listed();
         offline.apply(Msg::Failed(ApiError::Offline("timeout".into())), T0);
@@ -1601,9 +1623,14 @@ mod tests {
             ("searching", searching),
             ("list", list),
             ("list menu", list_menu),
-            ("detail", detailed()),
+            ("second row", second_row),
+            ("detail", detailed(0)),
+            ("second detail", detailed(1)),
             ("detail loading", detail_loading),
             ("gone", gone),
+            ("open by id", by_id()),
+            ("open by id failed", by_id_failed),
+            ("open by id gone", by_id_gone),
             ("detail menu", detail_menu),
             ("links", links),
             ("relations", relations),
@@ -1648,7 +1675,11 @@ mod tests {
             let text = rows.join("\n");
             for want in [
                 "Priority High",
-                "PR #7 open",
+                "PR #7 open (draft)",
+                "Project Onboarding",
+                "Cycle Sprint 12",
+                "Estimate 3",
+                "Due 2026-10-31",
                 "Parent     ",
                 "Blocked by ",
                 "Sub-issues ",
@@ -1659,6 +1690,28 @@ mod tests {
             ] {
                 assert!(text.contains(want), "{want}:\n{text}");
             }
+            // 담당자·본문이 없는 둘째 이슈: 목록 옆 미리보기와 상세
+            for (name, h) in [("second row", 30), ("second detail", 40)] {
+                let text = screen(get(name), 120, h).0.join("\n");
+                for want in ["Priority None", "Unassigned", "(no description)"] {
+                    assert!(text.contains(want), "{name}: {want}\n{text}");
+                }
+            }
+            // 식별자만 아는 상세
+            for (name, want) in [
+                ("open by id", "Loading ENG-9…"),
+                (
+                    "open by id failed",
+                    "ENG-9: couldn't load. Press r to retry",
+                ),
+                ("open by id gone", "ENG-9: not found, archived, or deleted"),
+            ] {
+                let text = screen(get(name), 120, 30).0.join("\n");
+                assert!(text.contains(want), "{name}: {want}\n{text}");
+            }
+            // 60칸 pane의 키 입력 칸은 56칸이라, 안내가 잘리지 않아야 한다
+            let (rows, _, _) = screen(get("env key"), 60, 20);
+            assert!(rows.iter().any(|r| r.contains(t().env_key_fix)), "{rows:?}");
             let (rows, _, _) = screen(get("offline"), 120, 30);
             assert!(rows[0].ends_with("Offline"), "{}", rows[0]);
             assert!(
@@ -1680,32 +1733,26 @@ mod tests {
                 let t = t();
                 let updated = |ms: i64| (t.status_updated)(&ago(T0, T0 - ms));
                 // (상단 오른쪽에 보여야 할 상태, 앱을 그 상태로 만드는 함수)
-                type Case = (String, Box<dyn Fn(&mut App)>);
+                // 별칭 없이 쓰면 clippy가 `Vec<(String, fn(..))>`를 너무 복잡하다고 본다
+                type Case = (String, fn(&mut App));
                 let cases: Vec<Case> = vec![
-                    (
-                        t.status_updating.to_string(),
-                        Box::new(|a: &mut App| a.loading = 1),
-                    ),
-                    (
-                        t.status_offline.to_string(),
-                        Box::new(|a: &mut App| a.problem = Some(Problem::Offline("x".into()))),
-                    ),
-                    (
-                        t.status_error.to_string(),
-                        Box::new(|a: &mut App| a.problem = Some(Problem::Error("x".into()))),
-                    ),
-                    (
-                        updated(59 * 60_000),
-                        Box::new(|a: &mut App| a.updated_at = Some(T0 - 59 * 60_000)),
-                    ),
-                    (
-                        updated(23 * 3_600_000),
-                        Box::new(|a: &mut App| a.updated_at = Some(T0 - 23 * 3_600_000)),
-                    ),
-                    (
-                        updated(99 * 86_400_000),
-                        Box::new(|a: &mut App| a.updated_at = Some(T0 - 99 * 86_400_000)),
-                    ),
+                    (t.status_updating.to_string(), |a| a.loading = 1),
+                    (t.status_offline.to_string(), |a| {
+                        a.problem = Some(Problem::Offline("x".into()))
+                    }),
+                    (t.status_error.to_string(), |a| {
+                        a.problem = Some(Problem::Error("x".into()))
+                    }),
+                    (updated(0), |a| a.updated_at = Some(T0)),
+                    (updated(59 * 60_000), |a| {
+                        a.updated_at = Some(T0 - 59 * 60_000)
+                    }),
+                    (updated(23 * 3_600_000), |a| {
+                        a.updated_at = Some(T0 - 23 * 3_600_000)
+                    }),
+                    (updated(99 * 86_400_000), |a| {
+                        a.updated_at = Some(T0 - 99 * 86_400_000)
+                    }),
                 ];
                 for (status, set) in cases {
                     let mut a = app();
@@ -1723,6 +1770,21 @@ mod tests {
                         assert!(rows[0].contains(tab.title()), "{lang:?}: {:?}", rows[0]);
                     }
                 }
+            });
+        }
+    }
+
+    #[test]
+    fn search_hint_fits_sixty_columns_in_every_language() {
+        for lang in Lang::ALL {
+            with_lang(lang, || {
+                // 검색어가 비어 있을 때의 안내가 60칸 pane에 잘리지 않고 다 보인다
+                let (rows, _, _) = screen(&app(), 60, 10);
+                assert!(
+                    rows[1].contains(t().search_placeholder.trim()),
+                    "{lang:?}: {:?}",
+                    rows[1]
+                );
             });
         }
     }
