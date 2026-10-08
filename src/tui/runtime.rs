@@ -716,6 +716,14 @@ fn find_branch_issue(
     queries::branch_issue(c, branch)
 }
 
+/// 바뀐 게 없어도 이 간격마다 다시 그린다. 상단 "n분 전 갱신"이 바뀌고 3초·10초 안내가 사라지게 한다.
+const REDRAW_MS: i64 = 1_000;
+
+/// 다시 그릴지: 마지막으로 그린 뒤 바뀐 게 있거나, 아직 안 그렸거나, 1초가 지났을 때.
+fn should_draw(changed: bool, last_draw: Option<i64>, now: i64) -> bool {
+    changed || last_draw.is_none_or(|at| now - at >= REDRAW_MS)
+}
+
 /// 터미널을 잡고 이벤트 루프를 돈다. 끝나면 (패닉이 나도) 터미널을 되돌린다.
 pub fn run(mut rt: Runtime, mut app: App, effects: Vec<Effect>) -> Result<()> {
     log_panics(rt.paths.log_file());
@@ -738,6 +746,9 @@ fn event_loop(
 ) -> Result<()> {
     // 마우스로 누른 곳은 마지막으로 그린 화면에서 찾는다
     let mut last = view::Drawn::default();
+    let mut last_draw = None;
+    // 마지막으로 그린 뒤 화면에 보일 것이 바뀌었는지
+    let mut changed = true;
     loop {
         let now = now_ms();
         let mut msgs = Vec::new();
@@ -747,6 +758,7 @@ fn event_loop(
         effects.extend(app.tick(now));
         // 결과가 새 일을 낳을 수 있어서 더 없을 때까지 돌린다
         while !effects.is_empty() || !msgs.is_empty() {
+            changed = true;
             for effect in std::mem::take(&mut effects) {
                 msgs.extend(rt.execute(effect, now));
             }
@@ -757,25 +769,34 @@ fn event_loop(
         if app.quit {
             return Ok(());
         }
-        let mut drawn = None;
-        terminal.draw(|f| drawn = Some(view::draw(f, app, now)))?;
-        if let Some(d) = drawn {
-            if let Some(max) = d.detail_max_scroll {
-                app.set_detail_max_scroll(max);
+        if should_draw(changed, last_draw, now) {
+            let mut drawn = None;
+            terminal.draw(|f| drawn = Some(view::draw(f, app, now)))?;
+            if let Some(d) = drawn {
+                if let Some(max) = d.detail_max_scroll {
+                    app.set_detail_max_scroll(max);
+                }
+                if let Some(offset) = d.list_offset {
+                    app.list_offset = offset;
+                }
+                last = d;
             }
-            if let Some(offset) = d.list_offset {
-                app.list_offset = offset;
-            }
-            last = d;
+            last_draw = Some(now);
+            changed = false;
         }
         if event::poll(Duration::from_millis(50))? {
             let input = match event::read()? {
                 Event::Key(key) => keys::translate(app.mode, app.menu.is_some(), key),
                 Event::Paste(text) => Some(Input::Paste(text)),
                 Event::Mouse(m) => keys::mouse(&last, m),
+                Event::Resize(..) => {
+                    changed = true;
+                    None
+                }
                 _ => None,
             };
             if let Some(input) = input {
+                changed = true;
                 effects.extend(app.handle(input, now_ms()));
             }
         }
@@ -1517,6 +1538,20 @@ mod tests {
             fx.rt.store.get_relations("a").unwrap().unwrap().0,
             cached,
             "cached relations should be unchanged"
+        );
+    }
+
+    #[test]
+    fn redraws_only_on_change_or_once_a_second() {
+        assert!(should_draw(false, None, T0), "아직 안 그렸으면 그린다");
+        assert!(should_draw(true, Some(T0), T0 + 10), "바뀐 게 있으면 바로");
+        assert!(
+            !should_draw(false, Some(T0), T0 + 999),
+            "가만히 있으면 그리지 않는다"
+        );
+        assert!(
+            should_draw(false, Some(T0), T0 + REDRAW_MS),
+            "1초마다 한 번은 그린다"
         );
     }
 }
