@@ -332,4 +332,25 @@ mod tests {
         assert_ne!((zh.minutes_ago)(5), (en.minutes_ago)(5));
         assert!(!include_str!("zh_cn.rs").contains("..EN"));
     }
+
+    #[test]
+    fn german_catalog_is_translated() {
+        let (de, en) = (texts_for(Lang::De), texts_for(Lang::En));
+        for (a, b) in [
+            (de.cli_about, en.cli_about),
+            (de.no_api_key, en.no_api_key),
+            (de.tab_mine, en.tab_mine),
+            (de.menu_close, en.menu_close),
+            (de.rel_blocked_by, en.rel_blocked_by),
+            (de.hints_list, en.hints_list),
+            (de.deep_limit, en.deep_limit),
+            (de.herdr_busy, en.herdr_busy),
+        ] {
+            assert_ne!(a, b);
+        }
+        assert_ne!((de.minutes_ago)(5), (en.minutes_ago)(5));
+        assert_eq!((de.whoami_scope)(1), "Suchbereich: 1 Team");
+        assert_eq!((de.whoami_scope)(2), "Suchbereich: 2 Teams");
+        assert!(!include_str!("de.rs").contains("..EN"));
+    }
 }
