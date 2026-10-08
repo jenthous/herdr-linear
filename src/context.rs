@@ -22,6 +22,7 @@ pub struct PluginContext {
     pub focused_pane_agent: Option<String>,
     pub focused_pane_cwd: Option<String>,
     pub workspace_cwd: Option<String>,
+    pub workspace_id: Option<String>,
     pub selected_text: Option<String>,
     pub clicked_url: Option<String>,
 }
@@ -252,5 +253,12 @@ mod tests {
         assert!(PathBuf::from(repo).ends_with(dir.path().file_name().unwrap()));
         git(&["checkout", "-q", "--detach"]);
         assert_eq!(current_branch(dir.path()), None, "detached HEAD");
+    }
+
+    #[test]
+    fn context_reads_the_workspace_id() {
+        let ctx = PluginContext::parse(r#"{"workspace_id":"w1","focused_pane_id":"w1:p2"}"#);
+        assert_eq!(ctx.workspace_id.as_deref(), Some("w1"));
+        assert_eq!(PluginContext::parse("{}").workspace_id, None);
     }
 }
