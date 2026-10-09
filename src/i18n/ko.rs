@@ -204,4 +204,8 @@ pub const KO: Texts = Texts {
     side_toggle_failed: |e| format!("사이드 pane을 열거나 닫지 못했어요: {e}"),
     unknown_workspace: "어느 워크스페이스인지 알 수 없어요",
     herdr_missing_field: |p| format!("herdr 응답에서 {p}를 찾지 못했어요"),
+    language_in_section: |s| {
+        format!("language가 [{s}] 안에 있어서 쓰지 않았어요. config.toml 맨 위로 옮기세요")
+    },
+    unknown_key: |k| format!("config.toml의 {k}는 알 수 없는 항목이라 무시해요"),
 };

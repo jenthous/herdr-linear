@@ -98,6 +98,7 @@ impl Default for Settings {
 
 /// config.toml을 읽는다. 파일이 없으면 기본값을 쓴다.
 /// 잘못된 항목은 그 항목만 기본값을 쓰고, 경고 문구를 함께 돌려준다.
+/// 읽지 않는 키(철자가 틀린 키, 구역 아래로 들어간 `language`)도 경고한다.
 pub fn load_settings(path: &Path) -> (Settings, Vec<String>) {
     let mut s = Settings::default();
     let mut warnings = Vec::new();
@@ -164,7 +165,49 @@ pub fn load_settings(path: &Path) -> (Settings, Vec<String>) {
             None => warnings.push(t().template_not_string.to_string()),
         }
     }
+    warn_unread_keys(&table, &mut warnings);
     (s, warnings)
+}
+
+/// 읽는 구역(`[side]` 등)의 키. 구역이 아니면 `None`.
+/// `load_settings`가 읽는 키와 같아야 한다: 새 키를 읽게 되면 여기에도 더한다.
+/// 빠뜨리면 맞는 키가 "알 수 없는 항목"으로 경고된다.
+fn section_keys(section: &str) -> Option<&'static [&'static str]> {
+    match section {
+        "side" => Some(&["refresh_seconds"]),
+        "cache" => Some(&["retention_days"]),
+        "agent" => Some(&["include_comments", "template"]),
+        _ => None,
+    }
+}
+
+/// 읽지 않고 넘어간 키를 말없이 두지 않고 알린다. 값은 쓰지 않는다.
+/// - 구역 안에 들어간 `language`: TOML은 `[구역]` 아래의 키를 그 구역의 키로 읽는다. 맨 위로 옮기라고 알린다.
+/// - 모르는 최상위 키와 읽는 구역 안의 모르는 키(`구역.키`): 철자가 틀린 것일 수 있다.
+///
+/// 키는 `toml::Table`의 순서(이름순)로 훑어서 경고 순서가 늘 같다.
+fn warn_unread_keys(table: &toml::Table, warnings: &mut Vec<String>) {
+    let t = t();
+    for (key, value) in table {
+        if matches!(key.as_str(), "language" | "teams") {
+            continue;
+        }
+        let known = section_keys(key);
+        if known.is_none() {
+            warnings.push((t.unknown_key)(key));
+        }
+        // 표가 아닌 값(`side = 3` 등)은 안에서 살펴볼 키가 없다
+        let Some(inner) = value.as_table() else {
+            continue;
+        };
+        for name in inner.keys() {
+            if name == "language" {
+                warnings.push((t.language_in_section)(key));
+            } else if known.is_some_and(|keys| !keys.contains(&name.as_str())) {
+                warnings.push((t.unknown_key)(&format!("{key}.{name}")));
+            }
+        }
+    }
 }
 
 /// `[section] key = 정수`를 읽는다. 범위를 벗어나면 기본값을 두고 경고한다.
@@ -686,5 +729,124 @@ mod tests {
         let (s, w) = load_settings(&path);
         assert_eq!(s.language, Lang::En);
         assert_eq!(w.len(), 1, "{w:?}");
+    }
+
+    /// `text`를 담은 임시 config.toml을 읽는다.
+    fn load_text(text: &str) -> (Settings, Vec<String>) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, text).unwrap();
+        load_settings(&path)
+    }
+
+    #[test]
+    fn language_below_a_section_header_is_reported_not_applied() {
+        // TOML은 `[side]` 아래의 키를 `side.language`로 읽는다: 말없이 영어로 남지 않게 알린다
+        let (s, w) = load_text("[side]\nrefresh_seconds = 30\nlanguage = \"ko\"\n");
+        assert_eq!(s.language, Lang::En);
+        assert_eq!(s.side_refresh_seconds, 30, "나머지 항목은 그대로 읽는다");
+        assert_eq!(
+            w,
+            vec!["language가 [side] 안에 있어서 쓰지 않았어요. config.toml 맨 위로 옮기세요"]
+        );
+        // 다른 구역(`[cache]`, `[agent]`)과 읽지 않는 구역(`[display]`)도 그 구역 이름을 알린다
+        for section in ["cache", "agent", "display"] {
+            let (s, w) = load_text(&format!("[{section}]\nlanguage = \"ko\"\n"));
+            assert_eq!(s.language, Lang::En, "{section}");
+            assert!(
+                w.contains(&format!(
+                    "language가 [{section}] 안에 있어서 쓰지 않았어요. config.toml 맨 위로 옮기세요"
+                )),
+                "{section}: {w:?}"
+            );
+        }
+        // 맨 위에 둔 language는 구역이 뒤따라도 그대로 읽는다
+        let (s, w) = load_text("language = \"ko\"\n[side]\nrefresh_seconds = 30\n");
+        assert_eq!(s.language, Lang::Ko);
+        assert!(w.is_empty(), "{w:?}");
+    }
+
+    #[test]
+    fn misspelled_top_level_key_is_reported() {
+        let (s, w) = load_text("langauge = \"ko\"\n");
+        assert_eq!(s.language, Lang::En);
+        assert_eq!(
+            w,
+            vec!["config.toml의 langauge는 알 수 없는 항목이라 무시해요"]
+        );
+        // 구역 이름이 틀려도 같다
+        let (_, w) = load_text("[sdie]\nrefresh_seconds = 30\n");
+        assert_eq!(w, vec!["config.toml의 sdie는 알 수 없는 항목이라 무시해요"]);
+    }
+
+    #[test]
+    fn unknown_key_inside_a_known_section_is_reported_with_its_section() {
+        let (s, w) = load_text("[side]\nrefresh = 30\n");
+        assert_eq!(s.side_refresh_seconds, 60, "틀린 이름의 값은 쓰지 않는다");
+        assert_eq!(
+            w,
+            vec!["config.toml의 side.refresh는 알 수 없는 항목이라 무시해요"]
+        );
+        let (_, w) = load_text("[cache]\nretention = 3\n[agent]\ninclude_comment = 2\n");
+        assert_eq!(
+            w,
+            vec![
+                "config.toml의 agent.include_comment는 알 수 없는 항목이라 무시해요",
+                "config.toml의 cache.retention는 알 수 없는 항목이라 무시해요",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_full_valid_config_has_no_warnings() {
+        let (s, w) = load_text(
+            "language = \"ja\"\nteams = [\"ENG\"]\n\
+             [side]\nrefresh_seconds = 30\n\
+             [cache]\nretention_days = 7\n\
+             [agent]\ninclude_comments = 2\ntemplate = \"{title}\"\n",
+        );
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(s.language, Lang::Ja);
+        assert_eq!(s.teams, vec!["ENG"]);
+        assert_eq!(s.side_refresh_seconds, 30);
+        assert_eq!(s.cache_retention_days, 7);
+        assert_eq!(s.agent_include_comments, 2);
+        assert_eq!(s.agent_template, "{title}");
+    }
+
+    #[test]
+    fn key_warnings_come_in_a_fixed_order_after_the_existing_ones() {
+        // 값이 틀린 항목의 경고가 먼저, 그다음 키 점검 경고가 키 이름순으로 나온다
+        let (_, w) = load_text(
+            "teams = 3\nzzz = 1\n[side]\nrefresh_seconds = \"fast\"\nlanguage = \"ko\"\nspeed = 2\n[display]\nlanguage = \"ko\"\n",
+        );
+        assert_eq!(
+            w,
+            vec![
+                "teams는 문자열 배열이어야 해요. 기본값을 써요",
+                "side.refresh_seconds는 0~3600 사이의 정수여야 해요. 기본값을 써요",
+                "config.toml의 display는 알 수 없는 항목이라 무시해요",
+                "language가 [display] 안에 있어서 쓰지 않았어요. config.toml 맨 위로 옮기세요",
+                "language가 [side] 안에 있어서 쓰지 않았어요. config.toml 맨 위로 옮기세요",
+                "config.toml의 side.speed는 알 수 없는 항목이라 무시해요",
+                "config.toml의 zzz는 알 수 없는 항목이라 무시해요",
+            ]
+        );
+    }
+
+    #[test]
+    fn key_warnings_follow_the_language() {
+        let w = with_lang(Lang::En, || {
+            load_text("[cache]\nlanguage = \"ko\"\nlangauge = \"ko\"\n").1
+        });
+        assert_eq!(
+            w,
+            vec![
+                "Unknown key cache.langauge in config.toml is ignored",
+                "language is inside [cache], so it was ignored. Move it to the top of config.toml",
+            ]
+        );
+        let w = with_lang(Lang::En, || load_text("langauge = \"ko\"\n").1);
+        assert_eq!(w, vec!["Unknown key langauge in config.toml is ignored"]);
     }
 }

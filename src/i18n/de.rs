@@ -12,7 +12,7 @@ pub const DE: Texts = Texts {
     cli_search_deep: "Tiefensuche auf dem Server (mit Kommentaren, bis zu 30 pro Minute)",
     cli_show: "Issue anzeigen (z. B. ENG-131)",
     cli_open: "herdr-Aktion: Palette mit dem Kontext des ursprünglichen Bereichs öffnen oder den Seitenbereich ein- und ausblenden",
-    cli_open_target: "palette: Tastenkürzel oder Befehlspalette, url: Ctrl+Klick auf einen Linear-Issue-Link, side: Seitenbereich öffnen oder schließen",
+    cli_open_target: "palette: Tastenkürzel oder Befehlspalette, url: Ctrl+Klick auf einen Linear-Issue-Link, side: Seitenbereich ein- oder ausblenden",
     cli_ui: "Oberfläche, die in einem herdr-Bereich läuft",
     write_failed: |e| format!("Fehler: Ausgabe konnte nicht geschrieben werden: {e}"),
     error_line: |m| format!("Fehler: {m}"),
@@ -113,7 +113,7 @@ pub const DE: Texts = Texts {
     rate_limited_retry_later: "Linear-API-Limit erreicht. Kurz warten und erneut versuchen",
     throttled: |m| {
         format!(
-            "API-Anfragen werden knapp. Automatische Serversuche pausiert für {}",
+            "Wenige API-Anfragen übrig. Serversuche {} pausiert",
             minuten(m)
         )
     },
@@ -244,6 +244,12 @@ pub const DE: Texts = Texts {
     },
     unknown_workspace: "Workspace konnte nicht ermittelt werden",
     herdr_missing_field: |p| format!("{p} fehlt in der herdr-Antwort"),
+    language_in_section: |s| {
+        format!(
+            "language steht in [{s}] und wurde ignoriert. An den Anfang von config.toml verschieben"
+        )
+    },
+    unknown_key: |k| format!("Unbekannter Eintrag {k} in config.toml wird ignoriert"),
 };
 
 /// "1 Minute", "5 Minuten"

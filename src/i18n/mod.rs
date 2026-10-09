@@ -48,12 +48,12 @@ impl Lang {
     /// 설정 값을 언어로 바꾼다. 대소문자·앞뒤 공백·`_`/`-`는 가리지 않고,
     /// POSIX 로캘의 꼬리(`.UTF-8`, `@euro`)는 떼고,
     /// 지역 태그(`de-DE`, `ja_JP`, `zh-Hans-CN`)는 앞부분으로 본다.
-    /// 번체 중국어(`zh-TW`, `zh-HK`, `zh-Hant`, `zh_TW.UTF-8` 등)와 모르는 값은 `None`이다.
+    /// 번체 중국어(`zh-TW`, `zh-HK`, `zh-Hant`, `zh_TW.UTF-8`, `zh.TW`, `zh@Hant` 등)와 모르는 값은 `None`이다.
     pub fn parse(value: &str) -> Option<Lang> {
         let lowered = value.trim().to_lowercase().replace('_', "-");
-        // `zh_TW.UTF-8`의 `.UTF-8`이 지역 태그 `tw`에 붙어 번체를 놓치지 않게, 별칭·분할 전에 자른다
-        let v = lowered.split(['.', '@']).next().unwrap_or("");
-        match v {
+        // 별칭(`korean` 등)은 `.`·`@`의 꼬리를 뗀 앞부분으로 본다
+        let alias = lowered.split(['.', '@']).next().unwrap_or("");
+        match alias {
             "english" => return Some(Lang::En),
             "korean" | "한국어" => return Some(Lang::Ko),
             "japanese" | "日本語" => return Some(Lang::Ja),
@@ -61,7 +61,8 @@ impl Lang {
             "german" | "deutsch" => return Some(Lang::De),
             _ => {}
         }
-        let mut parts = v.split('-');
+        // 언어·지역 태그는 `.`·`@`에서도 나눈다: 지역을 놓치면 `zh.TW`, `zh@Hant`가 간체가 된다
+        let mut parts = lowered.split(['-', '.', '@']);
         let rest: Vec<&str> = parts.clone().skip(1).collect();
         match parts.next().unwrap_or("") {
             "en" => Some(Lang::En),
@@ -216,6 +217,9 @@ mod tests {
             // 로캘의 꼬리가 붙어도 번체는 번체다
             "zh_TW.UTF-8",
             "zh_HK.UTF-8",
+            // POSIX 꼴이 아니어도 `.`·`@` 뒤의 지역·문자 태그로 번체를 알아본다
+            "zh.TW",
+            "zh@Hant",
         ] {
             assert_eq!(Lang::parse(value), None, "{value}");
         }

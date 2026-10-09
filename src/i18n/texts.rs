@@ -272,4 +272,9 @@ pub struct Texts {
     pub unknown_workspace: &'static str,
     /// JSON 포인터
     pub herdr_missing_field: fn(&str) -> String,
+    // ── 설정 점검 (`config`) ──
+    /// `language`가 `[구역]` 안에 있어서 읽지 않았다 (구역 이름)
+    pub language_in_section: fn(&str) -> String,
+    /// 알 수 없는 설정 항목이라 무시한다 (`키` 또는 `구역.키`)
+    pub unknown_key: fn(&str) -> String,
 }

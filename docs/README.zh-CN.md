@@ -117,7 +117,7 @@ refresh_seconds = 60     # 侧边窗格的刷新间隔 (0 到 3600 秒)；0 表�
 retention_days = 30      # 超过这么多天既没有获取也没有查看过的议题，会从缓存中清除
 ```
 
-语言设置会在下次启动面板、侧边窗格或 CLI 时生效。`de-DE`、`ja_JP` 这样的地区标签也可以使用。独立运行的 CLI 读取它自己的配置文件 `~/.config/herdr-linear/config.toml`；如果两者都用，请在那里也设置 `language`。herdr 命令面板中显示的操作名称来自插件清单 (manifest)，因此保持为英文。
+语言设置会在下次启动面板、侧边窗格或 CLI 时生效。请把 `language` 放在文件开头、所有 `[section]` 之前 (TOML 会把写在 `[section]` 下面的键归入该 `[section]`，放在下面就不会生效)。`de-DE`、`ja_JP` 这样的地区标签也可以使用。独立运行的 CLI 读取它自己的配置文件 `~/.config/herdr-linear/config.toml`；如果两者都用，请在那里也设置 `language`。herdr 命令面板中显示的操作名称来自插件清单 (manifest)，因此保持为英文。
 
 ## 文件
 

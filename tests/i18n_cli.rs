@@ -67,6 +67,36 @@ fn unknown_language_is_english_with_a_warning() {
 }
 
 #[test]
+fn language_below_a_section_header_is_reported_and_not_applied() {
+    // TOML이 `[side]` 아래의 `language`를 `side.language`로 읽는 실수: 영어로 남되 말없이 넘어가지 않는다
+    let home = tempfile::tempdir().unwrap();
+    write_cli_config(
+        home.path(),
+        "[side]\nrefresh_seconds = 30\nlanguage = \"ko\"\n",
+    );
+    let err = stderr(&run(home.path(), &[], &["whoami"]));
+    assert!(
+        err.contains(
+            "warning: language is inside [side], so it was ignored. Move it to the top of config.toml"
+        ),
+        "{err}"
+    );
+    assert!(err.contains("error: No API key."), "{err}");
+    assert!(!has_hangul(&err), "{err}");
+}
+
+#[test]
+fn misspelled_key_is_reported() {
+    let home = tempfile::tempdir().unwrap();
+    write_cli_config(home.path(), "langauge = \"ko\"\n");
+    let err = stderr(&run(home.path(), &[], &["whoami"]));
+    assert!(
+        err.contains("warning: Unknown key langauge in config.toml is ignored"),
+        "{err}"
+    );
+}
+
+#[test]
 fn plugin_config_dir_sets_the_language() {
     let home = tempfile::tempdir().unwrap();
     let plugin = home.path().join("plugin-config");

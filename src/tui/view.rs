@@ -530,7 +530,13 @@ fn draw_menu(f: &mut Frame, app: &App, area: Rect) -> Vec<Hit> {
         return Vec::new();
     };
     let items = menu.visible();
-    let w = (area.width * 6 / 10).max(30);
+    // 60칸 같은 좁은 pane에서는 6할이면 관계 제목이 몇 칸 남지 않는다(독일어·일본어는 칸 이름이 넓다):
+    // 80칸 미만이면 양옆 2칸씩만 비운다
+    let w = if area.width < 80 {
+        area.width.saturating_sub(4)
+    } else {
+        (area.width * 6 / 10).max(30)
+    };
     let h = u16::try_from(items.len())
         .unwrap_or(u16::MAX)
         .saturating_add(4);
@@ -606,8 +612,9 @@ fn draw_onboarding(f: &mut Frame, app: &App, area: Rect) {
         return;
     }
     lines.push(Line::from(t().paste_key));
+    // 상자 제목이 이미 Linear라서 "Linear → "는 뺀다: 60칸 pane의 글자 영역(56칸)에 맞는다
     lines.push(Line::from(Span::styled(
-        "Linear → Settings → Security & access → Personal API keys",
+        "Settings → Security & access → Personal API keys",
         DIM,
     )));
     lines.push(Line::default());
@@ -1811,6 +1818,153 @@ mod tests {
                 }
             });
         }
+    }
+
+    #[test]
+    fn flash_messages_fit_a_sixty_column_footer_in_every_language() {
+        // 푸터는 알림 앞에 한 칸을 띄우고 그린다: 60칸 pane에서는 알림 글자가 59칸까지 보인다
+        let mut too_wide = Vec::new();
+        for lang in Lang::ALL {
+            with_lang(lang, || {
+                let t = t();
+                // 시간이 들어가는 문구는 두 자리 수가 가장 넓은 경우(59분)로 잰다
+                for (name, text) in [
+                    ("deep_limit", t.deep_limit.to_string()),
+                    ("rate_limited_retry_in", (t.rate_limited_retry_in)(59)),
+                    (
+                        "rate_limited_retry_later",
+                        t.rate_limited_retry_later.to_string(),
+                    ),
+                    ("throttled", (t.throttled)(59)),
+                    ("only_web_links", t.only_web_links.to_string()),
+                    ("opened_in_browser", t.opened_in_browser.to_string()),
+                    ("key_offline", t.key_offline.to_string()),
+                ] {
+                    if text.width() > 59 {
+                        too_wide.push(format!("{lang:?} {name}: {} columns: {text}", text.width()));
+                    }
+                }
+            });
+        }
+        assert!(too_wide.is_empty(), "{too_wide:#?}");
+    }
+
+    #[test]
+    fn onboarding_key_hint_fits_sixty_columns() {
+        // 안내 줄은 카탈로그에 없어서 모든 언어에 같다. 60칸 pane의 글자 영역은 56칸이다
+        for lang in Lang::ALL {
+            with_lang(lang, || {
+                let (rows, _, _) = screen(&App::onboarding(false), 60, 20);
+                assert!(
+                    rows.iter()
+                        .any(|r| r.contains("Settings → Security & access → Personal API keys")),
+                    "{lang:?}: 발급 위치 안내 줄이 잘렸어요: {rows:?}"
+                );
+            });
+        }
+    }
+
+    const LONG_TITLE: &str = "Rework the authentication flow end to end";
+
+    /// 첫 관계(상위)의 제목이 긴 상세에서 연 관계 메뉴. 메뉴 항목은 열 때 정해지니 지금 언어 안에서 만든다.
+    fn relations_menu_with_long_titles() -> App {
+        let (mut a, _) = App::start(None);
+        a.apply(Msg::Viewer(latin_viewer()), T0);
+        let issue = IssueBuilder::new("a", "ENG-1", "Login bug")
+            .parent("p", "ENG-9", LONG_TITLE, "started")
+            .build();
+        a.apply(
+            Msg::Tab {
+                tab: Tab::Mine,
+                issues: vec![issue.clone()],
+                fresh: true,
+                has_more: false,
+                append: false,
+            },
+            T0,
+        );
+        a.handle(Input::Enter, T0);
+        a.apply(
+            Msg::Detail {
+                id: "a".into(),
+                issue,
+                comments: Vec::new(),
+                more: false,
+                relations: Some(IssueRelations {
+                    blocked_by: vec![latin_rel(
+                        "b1",
+                        "ENG-20",
+                        "Freeze the schema before the migration",
+                        "unstarted",
+                    )],
+                    ..IssueRelations::default()
+                }),
+                fresh: true,
+            },
+            T0,
+        );
+        a.handle(Input::Act(Act::Relations), T0);
+        a
+    }
+
+    /// 한 줄짜리 `area` 안의 글자 (넓은 글자 뒤 칸은 건너뛴다).
+    fn text_in(term: &Terminal<TestBackend>, area: Rect) -> String {
+        let buf = term.backend().buffer();
+        let mut s = String::new();
+        let mut x = area.x;
+        while x < area.right() {
+            let sym = buf[(x, area.y)].symbol();
+            s.push_str(sym);
+            x += if sym.width() == 2 { 2 } else { 1 };
+        }
+        s
+    }
+
+    #[test]
+    fn relations_menu_shows_enough_of_a_title_on_a_sixty_column_screen() {
+        // 60칸 사이드 pane에서 칸 이름이 넓은 언어(독일어·일본어)도 제목이 12칸은 보여야 한다.
+        // 뒤의 상세 화면에도 제목이 보이니 화면 전체가 아니라 메뉴 첫 항목의 칸만 본다
+        let prefix: String = LONG_TITLE.chars().take(12).collect();
+        let mut cut = Vec::new();
+        for lang in Lang::ALL {
+            with_lang(lang, || {
+                let (_, drawn, term) = screen(&relations_menu_with_long_titles(), 60, 20);
+                let first = drawn
+                    .hits
+                    .iter()
+                    .find(|h| h.target == Target::MenuItem(0))
+                    .expect("메뉴 첫 항목");
+                let item = text_in(&term, first.area);
+                if !item.contains(&prefix) {
+                    cut.push(format!("{lang:?}: {item:?}"));
+                }
+            });
+        }
+        assert!(cut.is_empty(), "제목이 {prefix:?}까지 안 보여요: {cut:#?}");
+    }
+
+    #[test]
+    fn menu_leaves_two_columns_each_side_below_eighty_columns() {
+        // 메뉴 항목 칸의 폭 = 메뉴 폭 - 테두리 2칸
+        let item_width = |w: u16| {
+            let mut a = app();
+            a.handle(Input::Menu, T0);
+            let (_, drawn, _) = screen(&a, w, 20);
+            drawn
+                .hits
+                .iter()
+                .find(|h| h.target == Target::MenuItem(0))
+                .expect("메뉴 첫 항목")
+                .area
+                .width
+        };
+        // 80칸 미만: 양옆 2칸씩만 비운다
+        assert_eq!(item_width(60), 54);
+        assert_eq!(item_width(79), 73);
+        // 80칸 이상: 화면의 6할 (최소 30칸)
+        assert_eq!(item_width(80), 46);
+        assert_eq!(item_width(100), 58);
+        assert_eq!(item_width(120), 70);
     }
 
     #[test]

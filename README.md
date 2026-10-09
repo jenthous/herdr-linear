@@ -115,7 +115,7 @@ refresh_seconds = 60     # how often the side pane refreshes (0 to 3600 seconds)
 retention_days = 30      # issues not fetched or viewed for this long are dropped from the cache
 ```
 
-The language applies the next time the palette, side pane, or CLI starts. Region tags such as `de-DE` or `ja_JP` also work. The standalone CLI reads its own file, `~/.config/herdr-linear/config.toml`; set `language` there as well if you use both. Action names in herdr's command palette come from the plugin manifest and stay in English.
+The language applies the next time the palette, side pane, or CLI starts. Keep `language` on the first lines, above any `[section]`: TOML puts a key below a `[section]` header into that section, where it is ignored. Region tags such as `de-DE` or `ja_JP` also work. The standalone CLI reads its own file, `~/.config/herdr-linear/config.toml`; set `language` there as well if you use both. Action names in herdr's command palette come from the plugin manifest and stay in English.
 
 ## Files
 

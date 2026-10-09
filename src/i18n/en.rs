@@ -49,7 +49,7 @@ pub const EN: Texts = Texts {
     rel_blocking: "Blocking",
     rel_related: "Related",
     rel_child: "Sub-issues",
-    children_over: |total| format!("over {total}"),
+    children_over: |total| format!("{total}+"),
     children_all_done: |total| {
         if total == 1 {
             "1 done".to_string()
@@ -106,7 +106,7 @@ pub const EN: Texts = Texts {
     rate_limited_retry_later: "Linear API rate limit reached. Try again shortly",
     throttled: |m| {
         format!(
-            "API requests are running low. Pausing automatic server search for {}",
+            "Few API requests left. Server search paused for {}",
             minutes(m)
         )
     },
@@ -225,6 +225,10 @@ pub const EN: Texts = Texts {
     side_toggle_failed: |e| format!("Couldn't open or close the side pane: {e}"),
     unknown_workspace: "Can't tell which workspace this is",
     herdr_missing_field: |p| format!("No {p} in the herdr response"),
+    language_in_section: |s| {
+        format!("language is inside [{s}], so it was ignored. Move it to the top of config.toml")
+    },
+    unknown_key: |k| format!("Unknown key {k} in config.toml is ignored"),
 };
 
 /// "1 minute", "5 minutes"

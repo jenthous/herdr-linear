@@ -117,7 +117,7 @@ refresh_seconds = 60     # wie oft der Seitenbereich aktualisiert wird (0 bis 36
 retention_days = 30      # Issues, die so lange weder geladen noch angesehen wurden, werden aus dem Cache entfernt
 ```
 
-Die Sprache gilt ab dem nächsten Start der Palette, des Seitenbereichs oder der CLI. Auch Regionskennungen wie `de-DE` oder `ja_JP` funktionieren. Die eigenständige CLI liest eine eigene Datei, `~/.config/herdr-linear/config.toml`; bei Nutzung beider `language` auch dort setzen. Aktionsnamen in der Befehlspalette von herdr stammen aus dem Plugin-Manifest und bleiben englisch.
+Die Sprache gilt ab dem nächsten Start der Palette, des Seitenbereichs oder der CLI. `language` gehört in die ersten Zeilen, oberhalb jeder `[section]`, denn TOML ordnet einen Schlüssel unterhalb einer `[section]` diesem Abschnitt zu, wo er nicht gelesen wird. Auch Regionskennungen wie `de-DE` oder `ja_JP` funktionieren. Die eigenständige CLI liest eine eigene Datei, `~/.config/herdr-linear/config.toml`; bei Nutzung beider `language` auch dort setzen. Aktionsnamen in der Befehlspalette von herdr stammen aus dem Plugin-Manifest und bleiben englisch.
 
 ## Dateien
 

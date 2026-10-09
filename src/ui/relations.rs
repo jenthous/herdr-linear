@@ -517,7 +517,7 @@ mod tests {
         more.more_children = true;
         let (out, _) = with_lang(Lang::En, || lines(None, Some(&more), 80));
         let got = text(&out);
-        assert!(got.iter().any(|l| l == "Sub-issues over 4"), "{got:?}");
+        assert!(got.iter().any(|l| l == "Sub-issues 4+"), "{got:?}");
         assert_eq!(
             got.last().unwrap(),
             &format!("{}… more (o to view in the browser)", " ".repeat(11))

@@ -1562,8 +1562,9 @@ mod tests {
                 );
             }
         };
-        check("ko");
-        with_lang(Lang::En, || check("en"));
+        for lang in Lang::ALL {
+            with_lang(lang, || check(lang.code()));
+        }
     }
 
     #[test]
