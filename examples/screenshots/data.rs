@@ -192,6 +192,73 @@ pub fn mine() -> Vec<Issue> {
     ]
 }
 
+/// 담당자를 바꾼다. 이름은 가짜다.
+fn assigned(mut v: Value, name: &str, display: &str) -> Value {
+    v["assignee"] = json!({ "id": format!("u-{display}"), "name": name, "displayName": display });
+    v
+}
+
+/// 검색 그림의 검색어. 글자와 라벨 조건을 함께 쓴다.
+pub const QUERY: &str = "session l:bug";
+
+/// 캐시된 검색 색인: 내 이슈와, `QUERY`에 걸리는 다른 사람의 이슈.
+/// 제목은 `mine`처럼 팔레트 목록 한 줄에 들어가게 짧다.
+pub fn index() -> Vec<Issue> {
+    let bug = || label("bug", "#eb5757");
+    let mut lost = issue(
+        "ENG-151",
+        "SSO session dropped",
+        IN_PROGRESS,
+        2,
+        vec![bug(), label("auth", "#4ea7fc")],
+        "2026-10-01T09:50:00.000Z",
+    );
+    lost["description"] = json!(
+        "After signing in with SSO, the session cookie is dropped on the first redirect \
+and users are signed out again.\n\n## Notes\n- Only when `SameSite` is missing\n- Started with release 4.12"
+    );
+    let mut all = mine();
+    all.extend(
+        [
+            assigned(lost, "Sam Lee", "sam"),
+            assigned(
+                issue(
+                    "OPS-61",
+                    "Session store is full",
+                    TODO,
+                    1,
+                    vec![bug()],
+                    "2026-09-30T22:10:00.000Z",
+                ),
+                "Riley Chen",
+                "riley",
+            ),
+            assigned(
+                issue(
+                    "ENG-136",
+                    "Mobile session drops",
+                    BACKLOG,
+                    3,
+                    vec![bug()],
+                    "2026-09-29T08:30:00.000Z",
+                ),
+                "Jordan Park",
+                "jordan",
+            ),
+            issue(
+                "ENG-109",
+                "Sessions not shared",
+                DONE,
+                4,
+                vec![bug()],
+                "2026-09-21T16:00:00.000Z",
+            ),
+        ]
+        .map(parse::<Issue>),
+    );
+    all
+}
+
 pub fn comments() -> Vec<Comment> {
     parse(json!([
         { "id": "c1", "body": "Reproduced on Safari 17.4. Chrome and Firefox are fine.",
