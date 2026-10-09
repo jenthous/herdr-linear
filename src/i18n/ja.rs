@@ -225,7 +225,7 @@ pub const JA: Texts = Texts {
     unknown_workspace: "どのワークスペースか特定できません",
     herdr_missing_field: |p| format!("herdrのレスポンスに {p} がありません"),
     language_in_section: |s| {
-        format!("languageが[{s}]の中にあるため無視されました。config.tomlの先頭に移動してください")
+        format!("languageをconfig.tomlの先頭に移してください ([{s}]の中にあります)")
     },
     unknown_key: |k| format!("config.tomlの{k}は不明な項目のため、無視します"),
 };

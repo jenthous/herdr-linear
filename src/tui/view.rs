@@ -1850,6 +1850,31 @@ mod tests {
     }
 
     #[test]
+    fn misplaced_language_warning_keeps_its_action_in_a_sixty_column_footer() {
+        // 설정 경고는 한 줄이라 60칸 푸터에서 59칸 뒤가 잘린다: 할 일("config.toml 맨 위로")이 앞에 있어야 보인다.
+        // 푸터가 그리는 줄은 " " + settings_warning(language_in_section("side"))
+        let mut cut = Vec::new();
+        for lang in Lang::ALL {
+            with_lang(lang, || {
+                let mut a = app();
+                a.apply(
+                    Msg::Warn((t().settings_warning)(&(t().language_in_section)("side"))),
+                    T0,
+                );
+                let (rows, _, _) = screen(&a, 60, 10);
+                let footer = rows.last().expect("푸터 줄");
+                if !footer.contains("config.toml") {
+                    cut.push(format!("{lang:?}: {footer}"));
+                }
+            });
+        }
+        assert!(
+            cut.is_empty(),
+            "푸터에서 config.toml까지 안 보여요: {cut:#?}"
+        );
+    }
+
+    #[test]
     fn onboarding_key_hint_fits_sixty_columns() {
         // 안내 줄은 카탈로그에 없어서 모든 언어에 같다. 60칸 pane의 글자 영역은 56칸이다
         for lang in Lang::ALL {

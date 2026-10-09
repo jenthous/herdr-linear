@@ -747,7 +747,7 @@ mod tests {
         assert_eq!(s.side_refresh_seconds, 30, "나머지 항목은 그대로 읽는다");
         assert_eq!(
             w,
-            vec!["language가 [side] 안에 있어서 쓰지 않았어요. config.toml 맨 위로 옮기세요"]
+            vec!["language를 config.toml 맨 위로 옮기세요 ([side] 안에 있어요)"]
         );
         // 다른 구역(`[cache]`, `[agent]`)과 읽지 않는 구역(`[display]`)도 그 구역 이름을 알린다
         for section in ["cache", "agent", "display"] {
@@ -755,7 +755,7 @@ mod tests {
             assert_eq!(s.language, Lang::En, "{section}");
             assert!(
                 w.contains(&format!(
-                    "language가 [{section}] 안에 있어서 쓰지 않았어요. config.toml 맨 위로 옮기세요"
+                    "language를 config.toml 맨 위로 옮기세요 ([{section}] 안에 있어요)"
                 )),
                 "{section}: {w:?}"
             );
@@ -826,8 +826,8 @@ mod tests {
                 "teams는 문자열 배열이어야 해요. 기본값을 써요",
                 "side.refresh_seconds는 0~3600 사이의 정수여야 해요. 기본값을 써요",
                 "config.toml의 display는 알 수 없는 항목이라 무시해요",
-                "language가 [display] 안에 있어서 쓰지 않았어요. config.toml 맨 위로 옮기세요",
-                "language가 [side] 안에 있어서 쓰지 않았어요. config.toml 맨 위로 옮기세요",
+                "language를 config.toml 맨 위로 옮기세요 ([display] 안에 있어요)",
+                "language를 config.toml 맨 위로 옮기세요 ([side] 안에 있어요)",
                 "config.toml의 side.speed는 알 수 없는 항목이라 무시해요",
                 "config.toml의 zzz는 알 수 없는 항목이라 무시해요",
             ]
@@ -843,7 +843,7 @@ mod tests {
             w,
             vec![
                 "Unknown key cache.langauge in config.toml is ignored",
-                "language is inside [cache], so it was ignored. Move it to the top of config.toml",
+                "Move language to the top of config.toml (it is in [cache])",
             ]
         );
         let w = with_lang(Lang::En, || load_text("langauge = \"ko\"\n").1);

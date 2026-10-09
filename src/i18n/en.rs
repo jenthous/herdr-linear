@@ -225,9 +225,7 @@ pub const EN: Texts = Texts {
     side_toggle_failed: |e| format!("Couldn't open or close the side pane: {e}"),
     unknown_workspace: "Can't tell which workspace this is",
     herdr_missing_field: |p| format!("No {p} in the herdr response"),
-    language_in_section: |s| {
-        format!("language is inside [{s}], so it was ignored. Move it to the top of config.toml")
-    },
+    language_in_section: |s| format!("Move language to the top of config.toml (it is in [{s}])"),
     unknown_key: |k| format!("Unknown key {k} in config.toml is ignored"),
 };
 

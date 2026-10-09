@@ -245,9 +245,7 @@ pub const DE: Texts = Texts {
     unknown_workspace: "Workspace konnte nicht ermittelt werden",
     herdr_missing_field: |p| format!("{p} fehlt in der herdr-Antwort"),
     language_in_section: |s| {
-        format!(
-            "language steht in [{s}] und wurde ignoriert. An den Anfang von config.toml verschieben"
-        )
+        format!("language an den Anfang von config.toml verschieben (steht in [{s}])")
     },
     unknown_key: |k| format!("Unbekannter Eintrag {k} in config.toml wird ignoriert"),
 };

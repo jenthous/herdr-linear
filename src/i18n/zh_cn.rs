@@ -204,8 +204,6 @@ pub const ZH_CN: Texts = Texts {
     side_toggle_failed: |e| format!("无法打开或关闭侧边窗格：{e}"),
     unknown_workspace: "无法确定当前是哪个工作区",
     herdr_missing_field: |p| format!("herdr 响应中没有 {p}"),
-    language_in_section: |s| {
-        format!("language 位于 [{s}] 中，已被忽略。请把它移到 config.toml 的开头")
-    },
+    language_in_section: |s| format!("请将 language 移到 config.toml 顶部 (当前在 [{s}] 中)"),
     unknown_key: |k| format!("config.toml 中的 {k} 是未知配置项，将被忽略"),
 };

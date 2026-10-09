@@ -273,7 +273,8 @@ pub struct Texts {
     /// JSON 포인터
     pub herdr_missing_field: fn(&str) -> String,
     // ── 설정 점검 (`config`) ──
-    /// `language`가 `[구역]` 안에 있어서 읽지 않았다 (구역 이름)
+    /// `language`가 `[구역]` 안에 있어서 읽지 않았다 (구역 이름).
+    /// 할 일(맨 위로 옮기기)을 앞에, 구역 이름을 뒤에 둔다: 한 줄 푸터가 뒤를 잘라도 할 일이 보인다
     pub language_in_section: fn(&str) -> String,
     /// 알 수 없는 설정 항목이라 무시한다 (`키` 또는 `구역.키`)
     pub unknown_key: fn(&str) -> String,

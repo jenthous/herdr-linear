@@ -76,9 +76,7 @@ fn language_below_a_section_header_is_reported_and_not_applied() {
     );
     let err = stderr(&run(home.path(), &[], &["whoami"]));
     assert!(
-        err.contains(
-            "warning: language is inside [side], so it was ignored. Move it to the top of config.toml"
-        ),
+        err.contains("warning: Move language to the top of config.toml (it is in [side])"),
         "{err}"
     );
     assert!(err.contains("error: No API key."), "{err}");
