@@ -8,28 +8,68 @@
 
 > Diese README ist eine Übersetzung der englischen Fassung. Bei Abweichungen gilt die englische README.
 
-## Screenshots
-
-![Die Palette: Suche schon während der Eingabe, das Issue des aktuellen Branches oben und eine Vorschau des ausgewählten Issues](images/de/palette.svg)
-
-![Der Seitenbereich bleibt neben einer Shell geöffnet](images/de/side.svg)
-
-![Issue-Details mit Beziehungen, einem offenen PR und der Beschreibung](images/de/detail.svg)
+![Die Palette: eigene Issues, das Issue des aktuellen Branches oben angeheftet, Prioritäts-Labels und eine Vorschau des ausgewählten Issues](images/de/palette.svg)
 
 ## Funktionen
 
-- **Tabs**: eigene offene Issues · zuletzt angesehen · alle Issues der eigenen Teams, dargestellt in den Status- und Label-Farben von Linear.
-- **Seitenbereich**: Mit einer zweiten Taste öffnet sich dieselbe Ansicht in einem eigenen Bereich rechts neben dem aktuellen; dieselbe Taste schließt den Seitenbereich wieder. Er bleibt offen und aktualisiert das gerade Angezeigte standardmäßig alle 60 Sekunden. Im Listenmodus schließt Esc ihn nicht, `q` schon.
+### Die Palette
+
+Per Taste öffnen und gleich lostippen. Drei Tabs zeigen die eigenen offenen Issues, die zuletzt angesehenen und alle Issues der eigenen Teams, in den Status- und Label-Farben von Linear.
+
 - **Priorität**: ein Label hinter der Issue-ID, dringendste zuerst: rot `P0` dringend, orange `P1` hoch, gelb `P2` mittel, grau `P3` niedrig. Das Such-Token `p:` nimmt weiterhin Linears Zahlen oder Namen (`p:1` oder `p:urgent` ist P0).
-- **Suche während der Eingabe**: Zwischengespeicherte Issues werden sofort durchsucht. Nach 300 ms Pause wird auch der Server durchsucht und die Ergebnisse werden zusammengeführt. Der Eintrag „⏎ Auf dem Server suchen (mit Kommentaren)“ am Ende der Liste durchsucht auch die Kommentare.
-- **Issue-Details**: Markdown-Beschreibung (Überschriften, Listen, Codeblöcke, Tabellen), Kommentare und eine Linkliste. Ein offener PR steht ganz oben.
-- **Beziehungen**: Die Detailansicht zeigt die Beziehungen eines Issues in den Statusfarben von Linear: Übergeordnet, Sub-Issues, Blockiert von, Blocker für und Verwandt. Mit `t` öffnet sich das Beziehungsmenü; ein Klick auf eine Zeile öffnet das Issue, mit Esc geht es zurück.
-- **Kopieren**: `y` kopiert die Issue-URL, `Y` den Link zum offenen PR. Kopiert wird per OSC 52, daher landet der Inhalt auch bei einer Remote-Verbindung zu herdr in der lokalen Zwischenablage.
 - **Aktueller Branch**: Steht der fokussierte Bereich auf einem Branch wie `me/eng-123-fix-login`, wird das zugehörige Issue oben angeheftet.
+- **Vorschau**: Ist das Fenster mindestens 100 Spalten breit, erscheint rechts eine Vorschau des ausgewählten Issues.
+
+### Suche während der Eingabe
+
+Zwischengespeicherte Issues werden sofort durchsucht. Nach 300 ms Pause wird auch der Server durchsucht und die Ergebnisse werden zusammengeführt. Freitext lässt sich mit Token wie `l:bug`, `s:todo`, `@me`, `#ENG` oder `p:urgent` kombinieren (siehe [Suchsyntax](#suchsyntax)). Der Eintrag „⏎ Auf dem Server suchen (mit Kommentaren)“ am Ende der Liste durchsucht auch die Kommentare.
+
+![Suche nach „session l:bug“: passende Bugs aus dem Cache, eine Vorschau des ersten Treffers und die Zeile für die Serversuche am Ende](images/de/search.svg)
+
+### Seitenbereich
+
+Mit einer zweiten Taste öffnet sich dieselbe Ansicht in einem eigenen Bereich rechts neben dem aktuellen; dieselbe Taste schließt den Seitenbereich wieder. Er bleibt offen und aktualisiert das gerade Angezeigte standardmäßig alle 60 Sekunden. Im Listenmodus schließt Esc ihn nicht, `q` schon.
+
+![Der Seitenbereich bleibt neben einer Shell geöffnet](images/de/side.svg)
+
+### Issue-Details
+
+Die Detailansicht zeigt die Markdown-Beschreibung (Überschriften, Listen, Codeblöcke, Tabellen), Kommentare und eine Linkliste (`u`). Ein offener PR steht ganz oben. Die Beziehungen (Übergeordnet, Sub-Issues, Blockiert von, Blocker für und Verwandt) erscheinen in den Statusfarben von Linear.
+
+![Issue-Details mit Beziehungen, einem offenen PR, der Beschreibung und Kommentaren](images/de/detail.svg)
+
+### Beziehungen
+
+Mit `t` öffnet sich das Beziehungsmenü; auch ein Klick auf eine Beziehungszeile öffnet das Issue. Mit Esc geht es zurück zur vorherigen Ansicht.
+
+![Das Beziehungsmenü: direkt zum übergeordneten Issue, zu einem Blocker oder zu einem Sub-Issue](images/de/relations.svg)
+
+### Aktionen und Kopieren
+
+Ctrl+K öffnet das Aktionsmenü; Tippen filtert die Einträge. Im Listen- und Detailmodus kopiert `y` die Issue-URL und `Y` den Link zum offenen PR. Kopiert wird per OSC 52, daher landet der Inhalt auch bei einer Remote-Verbindung zu herdr in der lokalen Zwischenablage.
+
+![Das Aktionsmenü (Ctrl+K): URL, PR-Link oder ID kopieren oder das Issue im Browser öffnen](images/de/menu.svg)
+
+### Außerdem
+
 - **Links**: Ctrl+Klick auf einen Link `linear.app/…/issue/…` in herdr öffnet ihn in der Palette. Wird die Palette bei markierter Issue-ID geöffnet, springt sie direkt zu diesem Issue.
 - **Maus**: Mit dem Mausrad bewegen und scrollen, per Klick auswählen, die ausgewählte Zeile erneut anklicken zum Öffnen. Alles Anklickbare leuchtet unter dem Mauszeiger auf.
 - **Cache zuerst**: Bereits angesehene Issues werden lokal gespeichert, beim nächsten Mal sofort angezeigt und im Hintergrund aktualisiert. Offline bleiben sie lesbar.
-- **Sprachen**: Standardmäßig Englisch. Mit `language` lässt sich die Oberfläche auf Koreanisch, Japanisch, Chinesisch (vereinfacht) oder Deutsch umstellen (siehe Konfiguration).
+
+### Sprachen
+
+Standardmäßig Englisch. Mit `language` lässt sich die Oberfläche auf Koreanisch, Japanisch, Chinesisch (vereinfacht) oder Deutsch umstellen (siehe [Konfiguration](#konfiguration)).
+
+<table>
+  <tr>
+    <td><a href="../README.md"><img src="images/en/palette.svg" width="380" alt="Die Palette auf Englisch"></a><br>English</td>
+    <td><a href="README.ko.md"><img src="images/ko/palette.svg" width="380" alt="Die Palette auf Koreanisch"></a><br>한국어</td>
+  </tr>
+  <tr>
+    <td><a href="README.ja.md"><img src="images/ja/palette.svg" width="380" alt="Die Palette auf Japanisch"></a><br>日本語</td>
+    <td><a href="README.zh-CN.md"><img src="images/zh-CN/palette.svg" width="380" alt="Die Palette auf Chinesisch (vereinfacht)"></a><br>简体中文</td>
+  </tr>
+</table>
 
 ## Voraussetzungen
 

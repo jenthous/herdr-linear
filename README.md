@@ -6,28 +6,68 @@ English · [한국어](docs/README.ko.md) · [日本語](docs/README.ja.md) · [
 
 [Roadmap](ROADMAP.md) · MIT
 
-## Screenshots
-
-![The palette: search as you type, with the current branch's issue on top and a preview of the selected issue](docs/images/en/palette.svg)
-
-![The side pane kept open next to a shell](docs/images/en/side.svg)
-
-![Issue detail with relations, an open PR, and the description](docs/images/en/detail.svg)
+![The palette: your issues with the current branch's issue pinned on top, priority labels, and a preview of the selected issue](docs/images/en/palette.svg)
 
 ## Features
 
-- **Tabs**: your open issues · recently viewed · all issues in your teams, drawn with Linear's own state and label colors.
-- **Side pane**: a second key opens the same screen in a pane to the right of your work, and closes it again. It stays open and refreshes what you're looking at every 60 seconds by default. In list mode, Esc doesn't close it; `q` does.
+### The palette
+
+Open it with a key and start typing. Three tabs list your open issues, recently viewed issues, and all issues in your teams, in Linear's own state and label colors.
+
 - **Priority**: a label after the issue ID, most urgent first: red `P0` urgent, orange `P1` high, yellow `P2` medium, gray `P3` low. The search token `p:` still takes Linear's numbers or names (`p:1` or `p:urgent` is P0).
-- **Search as you type**: cached issues are searched instantly. When you pause for 300 ms the server is searched too and the results are merged. Pick "⏎ Search on the server (includes comments)" at the bottom of the list to search comments as well.
-- **Issue detail**: markdown body (headings, lists, code blocks, tables), comments, and a list of links. An open PR is shown at the top.
-- **Relations**: the detail view lists the parent, sub-issues, blocked by, blocking, and related issues in Linear's state colors. Press `t` for the relations menu or click a line to open an issue, and Esc to come back.
-- **Copy**: `y` copies the issue URL and `Y` copies the open PR link. Copying uses OSC 52, so it reaches your clipboard even when you attach to herdr remotely.
 - **Current branch**: when the focused pane is on a branch like `me/eng-123-fix-login`, that issue is pinned at the top.
+- **Preview**: when the window is at least 100 columns wide, the selected issue is previewed on the right.
+
+### Search as you type
+
+Cached issues are searched instantly. When you pause for 300 ms the server is searched too and the results are merged. Mix free text with tokens such as `l:bug`, `s:todo`, `@me`, `#ENG`, or `p:urgent` (see [Search syntax](#search-syntax)). Pick "⏎ Search on the server (includes comments)" at the bottom of the list to search comments as well.
+
+![Searching for "session l:bug": matching bugs from the cache, a preview of the first one, and the server search row at the bottom](docs/images/en/search.svg)
+
+### Side pane
+
+A second key opens the same screen in a pane to the right of your work, and closes it again. It stays open and refreshes what you're looking at every 60 seconds by default. In list mode, Esc doesn't close it; `q` does.
+
+![The side pane kept open next to a shell](docs/images/en/side.svg)
+
+### Issue detail
+
+The detail view shows the markdown body (headings, lists, code blocks, tables), comments, and a list of links (`u`). An open PR is shown at the top, and the parent, sub-issues, blocked by, blocking, and related issues are listed in Linear's state colors.
+
+![Issue detail with relations, an open PR, the description, and comments](docs/images/en/detail.svg)
+
+### Relations
+
+Press `t` for the relations menu, or click a relation line, to open that issue. Esc brings you back to where you were.
+
+![The relations menu: jump to the parent, a blocker, or a sub-issue](docs/images/en/relations.svg)
+
+### Actions and copying
+
+Ctrl+K opens the action menu; type to filter it. In list and detail modes, `y` copies the issue URL and `Y` copies the open PR link. Copying uses OSC 52, so it reaches your clipboard even when you attach to herdr remotely.
+
+![The action menu (Ctrl+K): copy the URL, the PR link, or the ID, or open the issue in the browser](docs/images/en/menu.svg)
+
+### And more
+
 - **Links**: Ctrl+click a `linear.app/…/issue/…` link in herdr to open it in the palette. Open the palette with an issue ID selected to jump straight to that issue.
 - **Mouse**: wheel to move and scroll, click to select, click the selected row again to open it. Whatever you can click lights up under the pointer.
 - **Cache first**: issues you have seen are stored locally, shown instantly next time and refreshed in the background. They stay readable offline.
-- **Languages**: English by default. Set `language` to switch the interface to Korean, Japanese, Simplified Chinese, or German (see Configuration).
+
+### Your language
+
+English by default. Set `language` to switch the interface to Korean, Japanese, Simplified Chinese, or German (see [Configuration](#configuration)).
+
+<table>
+  <tr>
+    <td><a href="docs/README.ko.md"><img src="docs/images/ko/palette.svg" width="380" alt="The palette in Korean"></a><br>한국어</td>
+    <td><a href="docs/README.ja.md"><img src="docs/images/ja/palette.svg" width="380" alt="The palette in Japanese"></a><br>日本語</td>
+  </tr>
+  <tr>
+    <td><a href="docs/README.zh-CN.md"><img src="docs/images/zh-CN/palette.svg" width="380" alt="The palette in Simplified Chinese"></a><br>简体中文</td>
+    <td><a href="docs/README.de.md"><img src="docs/images/de/palette.svg" width="380" alt="The palette in German"></a><br>Deutsch</td>
+  </tr>
+</table>
 
 ## Requirements
 
