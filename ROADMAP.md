@@ -39,7 +39,15 @@
 - The screen is redrawn only when something changes, and otherwise once a second, so an idle pane uses almost no CPU.
 - v0.2.1: prebuilt binaries for macOS and Linux with SHA-256 checksums on GitHub Releases, so installing doesn't need Rust. Building from source stays as the fallback.
 
-## 🔜 v0.3 — actions and agent handoff (next)
+## ✅ v0.3 — interface languages
+
+- The interface is in English by default. Set `language` at the top of `config.toml` to switch it to Korean, Japanese, Simplified Chinese, or German. The palette, side pane, menus, notices, CLI output and `--help`, herdr notifications, and logs all follow it.
+- To keep the Korean interface after upgrading, put `language = "ko"` at the top of both `config.toml` files (the plugin's and the standalone CLI's).
+- A `language` key under a `[section]`, or a misspelled key, shows a warning instead of being ignored silently.
+- In panes narrower than 80 columns, menus use nearly the full width.
+- READMEs in five languages, each with a feature tour and screenshots drawn from fake data.
+
+## 🔜 v0.4 — actions and agent handoff (next)
 
 - **Change issues without leaving the terminal**: status, labels, assignee, comments, and new issues. Changes show up immediately. If Linear rejects one, it is rolled back and the reason is shown.
 - **Send an issue to an agent** (`p`):
@@ -58,7 +66,6 @@
 
 ## Under consideration
 
-- An English interface (the UI text is Korean for now)
 - Signing in with Linear OAuth instead of a personal API key
 
 ## Not planned
@@ -109,7 +116,15 @@
 - 바뀐 게 있을 때와 1초에 한 번만 다시 그려서, 가만히 둔 pane은 CPU를 거의 쓰지 않아요.
 - v0.2.1: macOS·Linux용 미리 빌드한 바이너리와 SHA-256 체크섬을 GitHub Releases에 올려서 Rust 없이도 설치돼요. 소스 빌드는 대체 수단으로 남아요.
 
-## 🔜 v0.3 — 변경 동작과 에이전트 전달 (다음)
+## ✅ v0.3 — 화면 언어
+
+- 화면 기본 언어는 영어예요. `config.toml` 맨 위의 `language`로 한국어, 일본어, 중국어(간체), 독일어로 바꿔요. 팔레트, 사이드 pane, 메뉴, 알림, CLI 출력과 `--help`, herdr 알림, 로그가 모두 그 언어를 따라요.
+- 올린 뒤에도 한국어 화면을 쓰려면 두 `config.toml`(플러그인, 단독 CLI) 맨 위에 `language = "ko"`를 넣어요.
+- `language`를 `[section]` 아래에 두거나 키 이름을 틀리면 조용히 무시하지 않고 경고해요.
+- 80칸보다 좁은 pane에서는 메뉴가 거의 전체 폭을 써요.
+- README를 다섯 언어로 쓰고, 언어마다 기능 둘러보기와 가짜 데이터로 그린 스크린샷을 넣었어요.
+
+## 🔜 v0.4 — 변경 동작과 에이전트 전달 (다음)
 
 - **터미널에서 바로 바꾸기**: 상태, 라벨, 담당자, 코멘트, 새 이슈. 바꾼 내용은 바로 보여요. Linear가 거절하면 되돌리고 이유를 보여 줘요.
 - **이슈를 에이전트에게 보내기** (`p`)
@@ -128,7 +143,6 @@
 
 ## 검토 중
 
-- 영어 화면 (지금은 화면 문구가 한국어예요)
 - 개인 API 키 대신 Linear OAuth로 로그인
 
 ## 하지 않을 것
