@@ -2650,7 +2650,7 @@ mod tests {
             app.apply(Msg::Throttled(T0 + 60_000), T0);
             assert_eq!(
                 app.flash_text(T0),
-                Some("Few API requests left. Server search paused for 1 minute")
+                Some("Few API requests left. Auto search paused for 1 minute")
             );
         });
     }

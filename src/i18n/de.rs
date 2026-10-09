@@ -113,7 +113,7 @@ pub const DE: Texts = Texts {
     rate_limited_retry_later: "Linear-API-Limit erreicht. Kurz warten und erneut versuchen",
     throttled: |m| {
         format!(
-            "Wenige API-Anfragen übrig. Serversuche {} pausiert",
+            "Wenige API-Anfragen übrig. Auto-Suche {} pausiert",
             minuten(m)
         )
     },
